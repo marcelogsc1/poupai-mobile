@@ -1,1 +1,12 @@
-
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "br.com.poupai.app",
+      "sha256_cert_fingerprints": [
+        "SUA_IMPRESSAO_DIGITAL_SHA256_AQUI"
+      ]
+    }
+  }
+]
