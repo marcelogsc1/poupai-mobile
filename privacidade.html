@@ -11,7 +11,8 @@
 body{font-family:'Plus Jakarta Sans',system-ui,sans-serif;background:#fdf6ef;color:#0d1117;line-height:1.7;-webkit-font-smoothing:antialiased}
 .wrap{max-width:720px;margin:0 auto;padding:48px 24px 80px}
 header{display:flex;align-items:center;gap:14px;margin-bottom:48px;padding-bottom:24px;border-bottom:2px solid #f0e6db}
-.logo{width:48px;height:48px;border-radius:14px;background:linear-gradient(145deg,#ff9b5d,#f97316);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 4px 16px rgba(249,115,22,.25)}
+.logo{width:48px;height:48px;border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(249,115,22,.25);flex-shrink:0}
+.logo img{width:100%;height:100%;object-fit:cover;display:block}
 .brand{font-size:22px;font-weight:800;color:#1a120a;letter-spacing:-.02em}
 .brand span{color:#f97316}
 h1{font-size:28px;font-weight:800;color:#1a120a;letter-spacing:-.02em;margin-bottom:8px}
@@ -30,7 +31,7 @@ footer{text-align:center;font-size:12px;color:#94a3b8;margin-top:48px;padding-to
 <body>
 <div class="wrap">
   <header>
-    <div class="logo">🐾</div>
+    <div class="logo"><img src="https://poupai-app.com.br/icon-192.png" alt="PoupAí"></div>
     <div class="brand">Poup<span>Aí</span></div>
   </header>
 
