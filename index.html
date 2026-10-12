@@ -619,6 +619,38 @@ textarea#fb-rules{font-family:var(--mono);font-size:12px;min-height:110px;white-
 (function(){
 'use strict';
 var FB = true;
+/* =================== Plataforma: site (web) ou app Android da Play Store (play) ===================
+   O mesmo arquivo serve os dois. Na Play Store não pode aparecer pagamento fora do Google Play
+   (política de pagamentos do Google Play), então o Stripe só existe no modo web.
+   Como o modo é escolhido, nesta ordem:
+   1. ?plataforma=play ou ?plataforma=web no endereço (para testar no navegador);
+   2. domínio poupai-app.com.br, que é o host do app Android (twa-manifest.json: host poupai-app.com.br,
+      startUrl /). O site para navegador fica em web.poupai-app.com.br;
+   3. endereço que começa com /play-store (para quando o app Android passar a abrir essa rota);
+   4. app aberto pelo pacote br.com.poupai.app (referrer android-app://);
+   5. o que já foi decidido nesta aba (sessionStorage), para continuar igual depois de recarregar.
+   Fora disso, é web. sessionStorage e não localStorage: o app Android divide o armazenamento com o
+   Chrome, e localStorage faria o site aberto no Chrome herdar o modo Play Store. */
+var PLATFORM = (function(){
+  var K = 'poupai-plataforma', p = '';
+  try { var q = new URLSearchParams(location.search).get('plataforma'); if (q === 'play' || q === 'web') p = q; } catch (e) {}
+  if (!p && /^(www\.)?poupai-app\.com\.br$/i.test(location.hostname)) p = 'play';
+  if (!p && /^\/play-store(\/|$)/.test(location.pathname)) p = 'play';
+  if (!p && /^android-app:\/\/br\.com\.poupai\.app/.test(document.referrer || '')) p = 'play';
+  if (!p){ try { p = sessionStorage.getItem(K) || ''; } catch (e) {} }
+  if (p !== 'play') p = 'web';
+  try { sessionStorage.setItem(K, p); } catch (e) {}
+  try { document.documentElement.setAttribute('data-plataforma', p); } catch (e) {}
+  return p;
+})();
+var IS_PLAY = PLATFORM === 'play';
+/* Stripe (só no modo web). Links públicos de pagamento e do portal do cliente; nenhuma chave secreta aqui. */
+var STRIPE = {
+  mensal: 'https://buy.stripe.com/00w3cu7a97LYa1V4JL7ss00',
+  anual: 'https://buy.stripe.com/eVq8wOgKJc2e8XRa457ss01',
+  portal: 'https://billing.stripe.com/p/login/00w3cu7a97LYa1V4JL7ss00',
+  precoMensal: 'R$ 14,90', precoAnual: 'R$ 135', anualPorMes: 'R$ 11,25'
+};
 var IMG_LOGO = 'data:image/jpeg;base64,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', IMG_MASCOTE = 'data:image/png;base64,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';
 /* =================== Utilidades =================== */
 var ESC = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'};
@@ -760,7 +792,8 @@ var ICON = {
   eye: '<path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/>',
   pix: '<path d="M12 3.2 20.8 12 12 20.8 3.2 12z"/><path d="M8.2 8.2c1.4 0 2.2.7 3.1 1.6l.7.7.7-.7c.9-.9 1.7-1.6 3.1-1.6M8.2 15.8c1.4 0 2.2-.7 3.1-1.6l.7-.7.7.7c.9.9 1.7 1.6 3.1 1.6"/>',
   cash: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/>',
-  barcode: '<path d="M4 5v14M7 5v14M10 5v14M14 5v14M16.5 5v14M20 5v14"/>'
+  barcode: '<path d="M4 5v14M7 5v14M10 5v14M14 5v14M16.5 5v14M20 5v14"/>',
+  camera: '<path d="M4 8.5A2.5 2.5 0 0 1 6.5 6H8l1.5-2h5L16 6h1.5A2.5 2.5 0 0 1 20 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/>'
 };
 function ic(name, size, extra){
   var s = size || 20;
@@ -1288,11 +1321,52 @@ function matchInstallment(desc, amount, m){
     return (nameHit || parcHit) && Math.abs(amount - v) <= Math.max(0.05, v * 0.02) && (nameHit || Math.abs(amount - v) <= 0.01);
   })[0] || null;
 }
+/* ---- Repetidos: nome parecido + valor igual (ou quase) + datas próximas, olhando também o mês vizinho ---- */
+var NAME_SKIP = ['de','do','da','dos','das','no','na','nos','nas','em','com','e','o','a','pix','ted','doc','pag','pagto'];
+// Deixa só o que identifica o lançamento: tira palavras genéricas (compra, pagamento, pix...), números e conectivos.
+function nameCore(s){ return norm(s).replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter(function(w){ return w.length >= 2 && !/^\d+$/.test(w) && STOP.indexOf(w) < 0 && NAME_SKIP.indexOf(w) < 0; }).join(' '); }
+function bigrams(s){ var o = []; for (var i = 0; i < s.length - 1; i++) o.push(s.substr(i, 2)); return o; }
+// 0 a 1: igual, palavra importante em comum, um contém o outro, ou grafia muito próxima ("ifood" e "i food", "mercado" e "supermercado").
+function nameSim(a, b){
+  var na = norm(a), nb = norm(b); if (!na || !nb) return 0; if (na === nb) return 1;
+  var wa = sigWords(a), wb = sigWords(b); if (wa.some(function(w){ return wb.indexOf(w) >= 0; })) return 0.9;
+  var x = nameCore(a).replace(/ /g, ''), y = nameCore(b).replace(/ /g, '');
+  if (!x || !y) return 0; if (x === y) return 1;
+  if (Math.min(x.length, y.length) >= 4 && (x.indexOf(y) >= 0 || y.indexOf(x) >= 0)) return 0.85;
+  var ba = bigrams(x), bb = bigrams(y).slice(), hit = 0; if (!ba.length || !bb.length) return 0;
+  ba.forEach(function(g){ var k = bb.indexOf(g); if (k >= 0){ hit++; bb.splice(k, 1); } });
+  return 2 * hit / (ba.length + bigrams(y).length);
+}
+function similarName(a, b){ return nameSim(a, b) >= 0.6; }
+// Valor "quebrado" idêntico (R$ 87,40) quase nunca se repete por acaso; valor redondo (R$ 50) precisa de nome parecido.
+function oddCents(v){ return Math.abs(v - Math.round(v)) >= 0.005; }
+function sameMoney(a, b, pct){ return Math.abs(a - b) <= Math.max(0.01, Math.max(a, b) * (pct || 0.01)); }
+function nearList(date, days, field){
+  if (!isDate(date)) return [];
+  var m = date.slice(0, 7), out = [];
+  [addMonths(m, -1), m, addMonths(m, 1)].forEach(function(mm){ var md = M[mm]; if (!md) return; (md[field] || []).forEach(function(e){ if (isDate(e.date) && Math.abs(daysBetween(e.date, date)) <= days) out.push(e); }); });
+  return out;
+}
+function expensesNear(date, days){ return nearList(date, days, 'expenses'); }
+function extrasNear(date, days){ return nearList(date, days, 'extras'); }
+// Repetido "forte": até 3 dias, valor até 1% e nome parecido; ou o mesmo valor quebrado até 1 dia de diferença.
+function isRepeatOf(e, desc, amount, date){
+  var d = Math.abs(daysBetween(e.date, date));
+  if (d <= 3 && sameMoney(e.amount, amount) && similarName(e.desc, desc)) return true;
+  return d <= 1 && Math.abs(e.amount - amount) < 0.005 && oddCents(amount);
+}
 function findRepeat(desc, amount, date, ignoreId){
-  var n = norm(desc), m = date.slice(0, 7), pool = monthDoc(m).expenses.slice();
-  var pm = addMonths(m, -1); if (dayOf(date) <= 3 && M[pm]) pool = pool.concat(M[pm].expenses);
-  var sw = sigWords(desc);
-  return pool.filter(function(e){ if (e.id === ignoreId) return false; if (Math.abs(e.amount - amount) > Math.max(0.01, amount * 0.01)) return false; if (Math.abs(daysBetween(e.date, date)) > 3) return false; return norm(e.desc) === n || sigWords(e.desc).some(function(w){ return sw.indexOf(w) >= 0; }); })[0] || null;
+  return expensesNear(date, 3).filter(function(e){ return e.id !== ignoreId && isRepeatOf(e, desc, amount, date); })[0] || null;
+}
+function findRepeatIncome(desc, amount, date){
+  return extrasNear(date, 3).filter(function(e){ return isRepeatOf(e, desc, amount, date); })[0] || null;
+}
+// Repetido "possível" (só alerta): até 7 dias, valor até 3% e nome parecido; ou o mesmo valor exato até 1 dia.
+function findMaybeRepeat(list, desc, amount, date){
+  return list.filter(function(e){
+    var d = Math.abs(daysBetween(e.date, date));
+    return (d <= 7 && sameMoney(e.amount, amount, 0.03) && similarName(e.desc, desc)) || (d <= 1 && Math.abs(e.amount - amount) < 0.005);
+  })[0] || null;
 }
 function pairKey(a, b){ return a < b ? a + '|' + b : b + '|' + a; }
 var _dupCache = { key: null, out: null };
@@ -1306,7 +1380,7 @@ function scanDuplicates(m){
       var a = ex[i], b = ex[j];
       if (Math.abs(a.amount - b.amount) > Math.max(0.01, a.amount * 0.01)) continue;
       if (Math.abs(daysBetween(a.date, b.date)) > 3) continue;
-      var same = info[i].n === info[j].n || info[i].w.some(function(w){ return info[j].w.indexOf(w) >= 0; });
+      var same = info[i].n === info[j].n || info[i].w.some(function(w){ return info[j].w.indexOf(w) >= 0; }) || similarName(a.desc, b.desc) || (Math.abs(a.amount - b.amount) < 0.005 && oddCents(a.amount) && Math.abs(daysBetween(a.date, b.date)) <= 1);
       if (!same) continue;
       if (P.dupOk.indexOf(pairKey(a.id, b.id)) >= 0) continue;
       out.push({ kind: 'pair', a: a, b: b, key: pairKey(a.id, b.id) });
@@ -1352,9 +1426,52 @@ var BANK_SEQ = [
   ['Caixa', ['na','caixa'], ['da','caixa'], ['pela','caixa']],
   ['PicPay', ['picpay']], ['Mercado Pago', ['mercado','pago']], ['BTG', ['btg']], ['Neon', ['neon']], ['PagBank', ['pagbank']]
 ];
+/* ---- Fala e texto livre: números por extenso, "reais", "centavos", "vírgula" ---- */
+var NUM_W = { zero: 0, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12, treze: 13, quatorze: 14, catorze: 14, quinze: 15, dezesseis: 16, dezasseis: 16, dezessete: 17, dezassete: 17, dezoito: 18, dezenove: 19, dezanove: 19, vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50, cincoenta: 50, sessenta: 60, setenta: 70, oitenta: 80, noventa: 90, cem: 100, cento: 100, duzentos: 200, duzentas: 200, trezentos: 300, trezentas: 300, quatrocentos: 400, quatrocentas: 400, quinhentos: 500, quinhentas: 500, seiscentos: 600, seiscentas: 600, setecentos: 700, setecentas: 700, oitocentos: 800, oitocentas: 800, novecentos: 900, novecentas: 900, mil: 1000 };
+var MONEY_W = ['reais', 'real', 'conto', 'contos', 'pila', 'pilas', 'pratas'];
+var CENT_W = ['centavos', 'centavo'];
+var MESES_N = { janeiro: 1, fevereiro: 2, marco: 3, abril: 4, maio: 5, junho: 6, julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12 };
+// "cinquenta e dois reais" vira "52 reais". Só converte quando claramente é número: vem antes de reais, centavos, vezes,
+// "de <mês>" ou depois de "dia", tem mais de uma palavra ("cento e vinte") ou é 10 ou mais. "Uma pizza" e "dois cafés" ficam como estão.
+function spokenNumbers(text){
+  var tk = String(text || '').split(/\s+/).filter(Boolean), nt = tk.map(function(t){ return norm(t).replace(/^[([{"']+|[)\]}"'.,;:!?]+$/g, ''); });
+  var out = [], i = 0;
+  while (i < tk.length){
+    var startsDigitMil = /^\d{1,3}$/.test(nt[i]) && nt[i + 1] === 'mil';
+    if (NUM_W[nt[i]] == null && !startsDigitMil){ out.push(tk[i]); i++; continue; }
+    var j = i, total = 0, cur = 0, last = Infinity, words = 0;
+    while (j < tk.length){
+      var w = nt[j];
+      if (w === 'mil'){ if (words && cur === 0 && total) break; total += (cur || 1) * 1000; cur = 0; last = 1000; words++; j++; continue; }
+      if (words === 0 && /^\d{1,3}$/.test(w) && nt[j + 1] === 'mil'){ cur = +w; last = 1000; words++; j++; continue; }
+      if (NUM_W[w] != null){ if (words && NUM_W[w] >= last) break; cur += NUM_W[w]; last = NUM_W[w]; words++; j++; continue; }
+      if (w === 'e' && words && NUM_W[nt[j + 1]] != null && nt[j + 1] !== 'mil' && NUM_W[nt[j + 1]] < last){ j++; continue; }
+      break;
+    }
+    if (j === i){ out.push(tk[i]); i++; continue; }
+    var v = total + cur, nx = nt[j], pv = nt[i - 1];
+    var sure = MONEY_W.indexOf(nx) >= 0 || CENT_W.indexOf(nx) >= 0 || ['vezes', 'x', 'parcelas', 'virgula'].indexOf(nx) >= 0 ||
+      (nx === 'e' && NUM_W[nt[j + 1]] != null) || (pv === 'dia' && v >= 1 && v <= 31) || (nx === 'de' && MESES_N[nt[j + 1]] != null && v >= 1 && v <= 31) || words >= 2 || v >= 10;
+    if (sure){ out.push(String(v) + (/[.,;:!?]$/.test(tk[j - 1]) ? tk[j - 1].slice(-1) : '')); i = j; }
+    else { out.push(tk[i]); i++; }
+  }
+  return out.join(' ');
+}
+// Junta valor falado: "52 reais e 30 centavos" e "dez e cinquenta" viram "52,30 reais" e "10,50 reais"; "52 vírgula 30" vira "52,30"; "50 centavos" vira "0,50 reais".
+function spokenMoney(text){
+  var cents = function(b){ return b.length === 1 ? '0' + b : b; };
+  return spokenNumbers(text)
+    .replace(/(\d+)\s*(reais|real|contos?|pilas?)\s*(?:e|com)\s*(\d{1,2})\s*centavos?/gi, function(_, a, w, b){ return a + ',' + cents(b) + ' reais'; })
+    .replace(/(^|[^\d,.])(\d+)\s+(?:(?:reais|real|contos?|pilas?)\s+)?e\s+(\d{2})(?=[\s.,;!?]|$)(?!\s*(?:mil|vezes|x\b|parcelas?|de\s|reais|real|centavos?|contos?))/gi, function(_, pre, a, b){ return pre + a + ',' + b + ' reais'; })
+    .replace(/(\d+)\s*v[ií]rgula\s*(\d{1,2})\b/gi, function(_, a, b){ return a + ',' + (b.length === 1 ? b + '0' : b); })
+    .replace(/(^|[^\d,.])(\d{1,2})\s*centavos?\b/gi, function(_, pre, b){ return pre + '0,' + cents(b) + ' reais'; })
+    .replace(/\s+/g, ' ').trim();
+}
+// "5 de outubro": deste ano; se ainda não chegou, do ano passado.
+function monthDayDate(d, mo, td){ var y = +td.slice(0, 4), c = y + '-' + p2(mo) + '-' + p2(d); if (!isDate(c)) return ''; if (c > td){ c = (y - 1) + c.slice(4); if (!isDate(c)) return ''; } return c; }
 function parseQuick(text, baseMonth){
   var raw = String(text || '').slice(0, 160);
-  var tokens = raw.trim().split(/\s+/).filter(Boolean).slice(0, 30);
+  var tokens = spokenMoney(raw).split(/\s+/).filter(Boolean).slice(0, 30);
   var nt = tokens.map(function(t){ return norm(t).replace(/^[([{"']+|[)\]}"'.;:!?]+$/g, ''); });
   var used = tokens.map(function(){ return false; });
   var out = { raw: raw, amount: 0, desc: '', cat: '', date: '', dateLabel: '', method: '', bank: '', n: 0, per: 0, kind: '', deferTo: '' };
@@ -1380,9 +1497,17 @@ function parseQuick(text, baseMonth){
     for (i = 0; i < nt.length - 1 && !out.date; i++){
       if (nt[i] === 'dia' && free(i) && free(i + 1) && /^\d{1,2}$/.test(nt[i + 1])){
         var d = +nt[i + 1]; if (d >= 1 && d <= 31){
+          if (free(i + 2) && nt[i + 2] === 'de' && free(i + 3) && MESES_N[nt[i + 3]] != null){ var dx = monthDayDate(d, MESES_N[nt[i + 3]], td); if (dx){ out.date = dx; out.dateLabel = fmtDay(dx); take(i, 4); continue; } }
           var mm = bm; if (bm === cm && d > dayOf(td)) mm = addMonths(cm, -1);
           out.date = dateIn(mm, d); out.dateLabel = 'Dia ' + d + (mm !== cm ? ' de ' + monthName(mm) : ''); take(i, 2);
         }
+      }
+    }
+  }
+  if (!out.date){
+    for (i = 0; i + 2 < nt.length && !out.date; i++){
+      if (free(i) && /^\d{1,2}$/.test(nt[i]) && free(i + 1) && nt[i + 1] === 'de' && free(i + 2) && MESES_N[nt[i + 2]] != null){
+        var dy = monthDayDate(+nt[i], MESES_N[nt[i + 2]], td); if (dy){ out.date = dy; out.dateLabel = fmtDay(dy); take(i, 3); if (free(i - 1) && ['em','no','dia'].indexOf(nt[i - 1]) >= 0) take(i - 1, 1); }
       }
     }
   }
@@ -1395,8 +1520,17 @@ function parseQuick(text, baseMonth){
   if (!out.date){
     for (i = 0; i < nt.length && !out.date; i++){
       if (free(i) && WEEKDAYS[nt[i]] != null){
-        var wd = WEEKDAYS[nt[i]], back = (dow(td) - wd + 7) % 7; out.date = addDays(td, -back); out.dateLabel = back === 0 ? 'Hoje' : cap(DOW[wd]) + ', ' + fmtDay(out.date);
-        take(i, 1); if (free(i - 1) && ['na','no','ultima','ultimo','nesta','neste'].indexOf(nt[i - 1]) >= 0) take(i - 1, 1); if (free(i + 1) && ['passada','passado','ultima','ultimo'].indexOf(nt[i + 1]) >= 0) take(i + 1, 1);
+        // Dia da semana: a ocorrência mais recente (hoje conta). "Passada", "última" ou "da semana passada" voltam uma semana quando cairia hoje.
+        var wd = WEEKDAYS[nt[i]], back = (dow(td) - wd + 7) % 7, end = i;
+        if (free(end + 1) && nt[end + 1] === 'feira') end++;
+        var pastWord = false, lastWeek = false;
+        if (free(end + 1) && ['passada','passado','ultima','ultimo','retrasada'].indexOf(nt[end + 1]) >= 0){ pastWord = true; end++; }
+        else if (free(end + 1) && free(end + 2) && free(end + 3) && ['da','de','na'].indexOf(nt[end + 1]) >= 0 && nt[end + 2] === 'semana' && ['passada','retrasada'].indexOf(nt[end + 3]) >= 0){ lastWeek = true; end += 3; }
+        var st = i; if (free(i - 1) && ['ultima','ultimo'].indexOf(nt[i - 1]) >= 0){ pastWord = true; st--; }
+        if (free(st - 1) && ['na','no','nesta','neste','essa','esse','desta','deste'].indexOf(nt[st - 1]) >= 0) st--;
+        if (lastWeek) back = dow(td) - wd + 7; else if (pastWord && back === 0) back = 7;
+        out.date = addDays(td, -back); out.dateLabel = back === 0 ? 'Hoje' : cap(DOW[wd]) + ', ' + fmtDay(out.date);
+        take(st, end - st + 1);
       }
     }
   }
@@ -1420,12 +1554,13 @@ function parseQuick(text, baseMonth){
     var tk = tokens[i].replace(/[;:!?]+$/, '');
     if (/^r\$$/i.test(tk) && free(i + 1)){ var v0 = parseMoney(tokens[i + 1]); if (v0 > 0){ cands.push({ i: i, len: 2, v: v0, score: 3 }); continue; } }
     var mt = tk.match(/^(r\$)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)$/i);
-    if (mt){ var v1 = parseMoney(mt[2]); if (v1 > 0) cands.push({ i: i, len: 1, v: v1, score: (mt[1] ? 3 : 0) + (/[.,]\d{1,2}$/.test(mt[2]) ? 2 : 0) }); }
+    if (mt){ var v1 = parseMoney(mt[2]); if (v1 > 0){ var cur1 = free(i + 1) && MONEY_W.indexOf(nt[i + 1]) >= 0; cands.push({ i: i, len: cur1 ? 2 : 1, v: v1, score: (mt[1] || cur1 ? 3 : 0) + (/[.,]\d{1,2}$/.test(mt[2]) ? 2 : 0) }); } }
   }
   if (cands.length){
     cands.sort(function(a, b){ return b.score - a.score || b.i - a.i; });
     var pick = cands[0]; out.amount = pick.v; take(pick.i, pick.len);
   }
+  for (i = 0; i < nt.length; i++) if (free(i) && (MONEY_W.indexOf(nt[i]) >= 0 || CENT_W.indexOf(nt[i]) >= 0 || nt[i] === 'r$')) take(i, 1);
   if (out.per && !out.amount){ out.amount = r2(out.per * out.n); }
   else if (out.per && out.amount){ out.amount = r2(out.per * out.n); }
   // ---- descrição
@@ -1487,7 +1622,7 @@ function avatarHtml(cls){ var ini = initials(displayName()); return '<span class
 var NAV = [
   { id: 'home', name: 'Início', icon: 'home' }, { id: 'gastos', name: 'Gastos', icon: 'list' }, { id: 'parcelas', name: 'Parcelas', icon: 'card' },
   { id: 'analise', name: 'Análise', icon: 'chart' }, { id: 'planejar', name: 'Planejamento', icon: 'bill' }, { id: 'metas', name: 'Metas', icon: 'target' },
-  { id: 'invest', name: 'Investimentos', icon: 'trend' }, { id: 'importar', name: 'Importar', icon: 'upload' }, { id: 'simular', name: 'Simulador', icon: 'calc' },
+  { id: 'invest', name: 'Investimentos', icon: 'trend' }, { id: 'importar', name: 'Importar', icon: 'upload' }, { id: 'ia', name: 'Ler com IA', icon: 'sparkles' }, { id: 'simular', name: 'Simulador', icon: 'calc' },
   { id: 'ajustes', name: 'Ajustes', icon: 'gear' }
 ];
 var MONTH_ROUTES = { home: 1, gastos: 1, parcelas: 1, analise: 1 };
@@ -1546,6 +1681,7 @@ function screenHtml(){
     case 'invest': return scrInvest();
     case 'simular': return scrSimular();
     case 'importar': return scrImportar();
+    case 'ia': return scrIa();
     case 'ajustes': return scrAjustes();
     case 'perfil': return scrPerfil();
     default: return scrHome();
@@ -1568,7 +1704,7 @@ function render(){
   var cur = navCurrent();
   var side = '<aside class="sidebar" aria-label="Menu"><button type="button" class="brandmark" data-act="go" data-v="home"><img src="' + IMG_LOGO + '" alt=""><b>PoupAí</b></button>' +
     '<button type="button" class="btn brand block side-launch" data-act="launch">' + ic('plus', 18) + 'Lançar</button>' +
-    NAV.map(function(n, i){ return (i === 4 || i === 9 ? '<div class="side-sep"></div>' : '') + '<button type="button" class="side-item" data-act="go" data-v="' + n.id + '"' + (UI.route === n.id ? ' aria-current="page"' : '') + '>' + ic(n.icon) + esc(n.name) + '</button>'; }).join('') +
+    NAV.map(function(n, i){ return (n.id === 'planejar' || n.id === 'ajustes' ? '<div class="side-sep"></div>' : '') + '<button type="button" class="side-item" data-act="go" data-v="' + n.id + '"' + (UI.route === n.id ? ' aria-current="page"' : '') + '>' + ic(n.icon) + esc(n.name) + '</button>'; }).join('') +
     '<button type="button" class="side-item" data-act="go" data-v="perfil"' + (UI.route === 'perfil' ? ' aria-current="page"' : '') + '>' + avatarHtml() + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(displayName() || 'Perfil e conta') + '</span></button>' +
     '<button type="button" class="side-item" data-act="guide">' + ic('help') + 'Guia de uso</button></aside>';
   var navItems = [['home', 'Início', 'home'], ['gastos', 'Gastos', 'list'], ['plus', 'Lançar', 'plus'], ['parcelas', 'Parcelas', 'card'], ['mais', 'Mais', 'grid']];
@@ -2549,14 +2685,17 @@ function classifyStatement(base){
     var key = n + '|' + o.amount + '|' + o.date;
     if (seen[key]){ o.type = 'ignorar'; o.badge = 'Repetido no arquivo'; o.tone = 'bad'; o.note = 'Mesma descrição, valor e data de outra linha deste arquivo.'; return o; }
     seen[key] = 1;
-    if (credit){ o.type = 'entrada'; o.badge = 'Entrada'; o.tone = 'accent'; o.note = 'Valor recebido. Entra como receita extra do mês.'; return o; }
+    if (credit){
+      var exIn = findRepeatIncome(r.desc, o.amount, o.date);
+      if (exIn){ o.type = 'ignorar'; o.badge = 'Já lançada'; o.tone = 'bad'; o.note = 'Entrada parecida: ' + exIn.desc + ' · ' + money(exIn.amount) + ' em ' + fmtDay(exIn.date); return o; }
+      o.type = 'entrada'; o.badge = 'Entrada'; o.tone = 'accent'; o.note = 'Valor recebido. Entra como receita extra do mês.'; return o;
+    }
     var inst = matchInstallment(r.desc, o.amount, m);
     if (inst){ o.type = 'ignorar'; o.badge = 'Parcela já cadastrada'; o.tone = ''; o.note = inst.desc + ' já entra sozinha em ' + monthName(m) + ' (' + money(instPortion(inst, m)) + ').'; o.refInst = inst.id; return o; }
     var mb = matchBill(r.desc, o.amount, m);
     if (mb && !mb.payment && !claimed[m + mb.bill.id]){ claimed[m + mb.bill.id] = 1; o.type = 'conta'; o.billId = mb.bill.id; o.cat = mb.bill.cat; o.badge = 'Conta do mês'; o.tone = 'warn'; var d = r2(o.amount - mb.bill.amount); o.note = mb.bill.name + ' · previsto ' + money(mb.bill.amount) + (Math.abs(d) >= 0.01 ? (d > 0 ? ' (' + money(d) + ' acima)' : ' (' + money(-d) + ' abaixo)') : '') + '. Será marcada como paga.'; return o; }
     if (mb && mb.payment){ o.type = 'ignorar'; o.badge = 'Conta já paga'; o.tone = 'bad'; o.note = mb.bill.name + ' já foi registrada em ' + fmtDay(mb.payment.date) + ' com ' + money(mb.payment.amount) + '.'; return o; }
-    var sw = sigWords(r.desc);
-    var ex = monthDoc(m).expenses.filter(function(e){ return Math.abs(e.amount - o.amount) <= Math.max(0.01, o.amount * 0.01) && Math.abs(daysBetween(e.date, o.date)) <= 3 && (norm(e.desc) === norm(r.desc) || sigWords(e.desc).some(function(w){ return sw.indexOf(w) >= 0; }) || Math.abs(e.amount - o.amount) < 0.005); })[0];
+    var ex = expensesNear(o.date, 3).filter(function(e){ return isRepeatOf(e, r.desc, o.amount, o.date) || (Math.abs(e.amount - o.amount) < 0.005 && Math.abs(daysBetween(e.date, o.date)) <= 3); })[0];
     if (ex){ o.type = 'ignorar'; o.badge = 'Já lançado'; o.tone = 'bad'; o.note = ex.desc + ' · ' + money(ex.amount) + ' em ' + fmtDay(ex.date); return o; }
     var pat = detectInstallmentPattern(r.instText || r.desc);
     if (pat){ o.type = 'parcela'; o.parcAtual = pat.atual; o.parcTotal = pat.total; o.badge = 'Parcela nova'; o.tone = 'info'; o.note = 'Parcela ' + pat.atual + ' de ' + pat.total + '. Vira uma compra parcelada que entra sozinha nos próximos meses.'; return o; }
@@ -2621,7 +2760,6 @@ function scrImportar(){
   if (!I.rows){
     h += '<div class="scrollx" role="group" aria-label="O que importar">' + IMP_MODES.map(function(x){ return '<button type="button" class="chip" data-act="imp-mode" data-v="' + x.id + '" aria-pressed="' + (I.mode === x.id) + '">' + ic(x.icon, 16) + esc(x.name) + '</button>'; }).join('') + '</div>';
     h += '<p class="muted" style="margin:0;font-size:13.5px">' + esc((IMP_MODES.filter(function(x){ return x.id === I.mode; })[0] || IMP_MODES[0]).help) + '</p>';
-    if (FB && I.mode === 'auto' && typeof iaImportCardHtml === 'function') h += iaImportCardHtml(I);
     h += '<div class="cols two"><div class="col"><label class="drop" id="imp-drop" for="imp-file">' + ic('upload', 32) + '<b>Escolher arquivo</b><span class="muted" style="font-size:13px">ou arraste aqui · CSV, TXT, OFX, XLSX ou XLS até 5 MB</span>' + (I.file ? '<span class="pill accent">' + esc(I.file) + '</span>' : '') + (I.busy ? '<span class="pill">Lendo…</span>' : '') + '</label><input type="file" id="imp-file" class="sr" accept=".csv,.txt,.ofx,.qfx,.tsv,.xlsx,.xls,text/csv,text/plain"></div>' +
       '<div class="col"><div class="field"><label for="imp-text">Ou cole as linhas aqui</label><textarea class="input" id="imp-text" data-live="impText" rows="8" maxlength="400000" placeholder="05/10 SUPERMERCADO EXTRA 132,90&#10;08/10 VIVO FIBRA 99,90&#10;10/10 PGTO BOLETO IMOBILIARIA 1.450,00">' + esc(I.text) + '</textarea><div class="hint">Pode colar com cabeçalho. Linhas de total, saldo e pagamento de fatura são ignoradas.</div></div></div></div>';
     h += '<div class="err" id="imp-err" role="alert">' + esc(I.msg || '') + '</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn primary" style="flex:2;min-width:200px" data-act="imp-analyze">' + ic('search', 18) + 'Analisar e revisar</button>' + (MODE !== 'real' ? '<button type="button" class="btn" style="flex:1;min-width:160px" data-act="imp-sample">Linhas de teste</button>' : '') + '</div>';
@@ -2634,7 +2772,6 @@ function scrImportar(){
   }
   var rows = I.rows, counts = {};
   rows.forEach(function(r){ counts[r.type] = (counts[r.type] || 0) + 1; });
-  if (I.source === 'IA' && typeof iaReviewNotice === 'function') h += iaReviewNotice(I);
   h += '<div class="notice info">' + (I.source === 'OFX' ? 'Arquivo OFX lido. ' : '') + 'O app comparou cada linha com suas contas, parcelas e lançamentos. Confira a ação de cada uma antes de confirmar.' + (I.skipped ? ' ' + cnt(I.skipped, 'linha foi ignorada', 'linhas foram ignoradas') + ' (sem valor, cabeçalho repetido ou linha de total e saldo).' : '') + '</div>';
   h += '<div class="chips">' + Object.keys(counts).map(function(k){ return '<span class="pill ' + (k === 'ignorar' ? '' : 'accent') + '">' + counts[k] + ' · ' + esc(IMP_TYPES[k] || k) + '</span>'; }).join('') + '</div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sm' + (I.bulk ? ' primary' : '') + '" data-act="imp-bulk">' + ic('check', 16) + (I.bulk ? 'Selecionando' : 'Editar várias de uma vez') + '</button></div>';
@@ -2719,7 +2856,7 @@ function scrMais(){
   var items = [
     ['analise', 'Análise', 'Score, dicas, diagnóstico e evolução', 'chart'], ['planejar', 'Planejamento', 'Receita, contas fixas e limites', 'bill'],
     ['metas', 'Metas', 'Objetivos e quanto guardar por mês', 'target'], ['invest', 'Investimentos', 'Carteira, rendimento e projeção', 'trend'],
-    ['simular', 'Posso comprar?', 'Simule compras e parcelas', 'calc'], ['importar', 'Importar', 'Extratos, faturas e planilhas', 'upload'],
+    ['simular', 'Posso comprar?', 'Simule compras e parcelas', 'calc'], ['importar', 'Importar', 'Extratos, faturas e planilhas', 'upload'], ['ia', 'Ler com IA', 'Foto, print, notificação ou PDF', 'sparkles'],
     ['ajustes', 'Ajustes', 'Preferências, categorias e dados', 'gear'], ['perfil', 'Perfil e conta', displayName() || 'Seu nome e foto', 'user']
   ];
   var sc = (FB && !isPremium()) ? { empty: true } : scoreOf(curMonth());
@@ -3405,6 +3542,8 @@ var ACTIONS = {
   'save-entrada': function(){
     var f = UI.sheet.f, desc = cleanText(f.desc, 50), val = parseMoney(f.val);
     if (!desc) return setErr('Dê um nome para a entrada.'); if (!(val > 0)) return setErr('Informe um valor válido.'); if (!isDate(f.date)) return setErr('Escolha uma data válida.');
+    var rep = findRepeatIncome(desc, val, f.date), rk = rep ? rep.id + '|' + val + '|' + f.date : '';
+    if (rep && UI.sheet.repOk !== rk){ UI.sheet.repOk = rk; return setErr('Parece repetida: você já lançou ' + rep.desc + ' de ' + money(rep.amount) + ' em ' + fmtDay(rep.date) + '. Se for outra entrada, toque em Salvar de novo.'); }
     var m = f.date.slice(0, 7); monthDoc(m, true).extras.push({ id: uid(), desc: desc, amount: val, date: f.date }); UI.sheet = null; commit(kMonth(m)); toast('Entrada de ' + money(val) + ' registrada.');
   },
   'save-guardar': function(){
@@ -3745,14 +3884,15 @@ document.addEventListener('submit', function(ev){
 document.addEventListener('dragover', function(ev){
   if (!ev.dataTransfer || Array.prototype.indexOf.call(ev.dataTransfer.types || [], 'Files') < 0) return;
   ev.preventDefault();
-  var z = document.getElementById('imp-drop'); if (z) z.classList.toggle('over', !!(ev.target.closest && ev.target.closest('#imp-drop')));
+  var z = document.getElementById('imp-drop') || document.getElementById('ia-drop'); if (z) z.classList.toggle('over', !!(ev.target.closest && ev.target.closest('#imp-drop, #ia-drop')));
 });
-document.addEventListener('dragleave', function(ev){ var z = document.getElementById('imp-drop'); if (z && !(ev.relatedTarget && z.contains(ev.relatedTarget))) z.classList.remove('over'); });
+document.addEventListener('dragleave', function(ev){ var z = document.getElementById('imp-drop') || document.getElementById('ia-drop'); if (z && !(ev.relatedTarget && z.contains(ev.relatedTarget))) z.classList.remove('over'); });
 document.addEventListener('drop', function(ev){
   if (!ev.dataTransfer || !ev.dataTransfer.files || !ev.dataTransfer.files.length) return;
   ev.preventDefault();
-  var z = document.getElementById('imp-drop'); if (z) z.classList.remove('over');
+  var z = document.getElementById('imp-drop') || document.getElementById('ia-drop'); if (z) z.classList.remove('over');
   if (UI.route === 'importar' && !(UI.imp && UI.imp.rows)) importFile(ev.dataTransfer.files[0]);
+  else if (UI.route === 'ia' && FB && isPremium()) iaFile(ev.dataTransfer.files[0]);
 });
 document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible') reloadMine(); });
 window.addEventListener('scroll', function(){ var t = document.querySelector('.topbar'); if (t) t.classList.toggle('scrolled', window.scrollY > 4); }, { passive: true });
@@ -4631,7 +4771,7 @@ function listenRoot(uid){
     if (!s.exists() || !LEG) return;
     var d = s.data() || {};
     var prem = { premium: d.premium === true, since: d.premiumSince || null, trialStart: d.trialStart || PREM.trialStart };
-    if (!same(prem, PREM)){ PREM = prem; render(); }
+    if (!same(prem, PREM)){ var era = PREM.premium; PREM = prem; render(); if (!era && prem.premium) toast('Premium liberado. Obrigado por assinar!'); }
     var v = Number(d._settingsUpdatedAt) || 0;
     if (v > LEG.version && !(SAVE.busy && v === SAVE.writing)) requestReload();
   }, function(e){ console.warn('[PoupAí] Escuta do servidor parou:', e && e.code); });
@@ -4958,15 +5098,58 @@ SHEETS.fbWrite = function(){
 SHEETS.fbPremium = function(){
   var st = premiumState(), h = sheetHead('PoupAí Premium');
   h += '<div class="notice ' + st.tone + '"><strong>' + esc(st.title) + '</strong> ' + esc(st.detail) + '</div>';
-  h += '<div class="list">' + [['sparkles', 'Balanço financeiro inteligente', 'Score, alertas e leitura clara do mês.'], ['chart', 'Análises e gráficos', 'Gastos por categoria, evolução e comparativos.'], ['trend', 'Investimentos e patrimônio', 'Rendimento estimado e projeções.'], ['target', 'Metas', 'Quanto falta, quanto guardar e em quanto tempo.'], ['file', 'Leitura com IA', 'Foto, print ou PDF viram lançamentos para você revisar.']].map(function(x){ return '<div class="item"><span class="ic">' + ic(x[0], 19) + '</span><span class="main2"><span class="t">' + x[1] + '</span><span class="s" style="white-space:normal">' + x[2] + '</span></span></div>'; }).join('') + '</div>';
-  h += '<p class="muted" style="margin:0;font-size:13px">A assinatura pela Play Store chega em breve. Quando você assinar, o Premium vale em qualquer aparelho em que entrar com este e-mail.</p>';
+  h += '<div class="list">' + [['sparkles', 'Balanço financeiro inteligente', 'Score, alertas e leitura clara do mês.'], ['chart', 'Análises e gráficos', 'Gastos por categoria, evolução e comparativos.'], ['trend', 'Investimentos e patrimônio', 'Rendimento estimado e projeções.'], ['target', 'Metas', 'Quanto falta, quanto guardar e em quanto tempo.'], ['file', 'Leitura com IA', 'Foto, print, notificação ou PDF viram lançamentos para você conferir.']].map(function(x){ return '<div class="item"><span class="ic">' + ic(x[0], 19) + '</span><span class="main2"><span class="t">' + x[1] + '</span><span class="s" style="white-space:normal">' + x[2] + '</span></span></div>'; }).join('') + '</div>';
+  if (IS_PLAY){
+    h += '<p class="muted" style="margin:0;font-size:13px">' + (PREM.premium ? 'O Premium vale em qualquer aparelho em que você entrar com este e-mail.' : 'A assinatura pela Play Store chega em breve. Quando você assinar, o Premium vale em qualquer aparelho em que entrar com este e-mail.') + '</p>';
+    return h;
+  }
+  if (PREM.premium){
+    h += '<div class="actions"><button type="button" class="btn block" data-act="stripe-portal">' + ic('card', 16) + 'Gerenciar ou cancelar assinatura</button></div>';
+    h += '<p class="muted" style="margin:0;font-size:13px">A assinatura é gerenciada no portal seguro do Stripe, que abre em uma nova aba. Se cancelar, o Premium continua até o fim do período já pago.</p>';
+    return h;
+  }
+  h += '<div class="card pad" style="display:flex;flex-direction:column;gap:4px;border-color:var(--accent)"><span class="pill accent" style="align-self:flex-start">Melhor escolha</span><b style="font-size:17px">Plano anual: ' + STRIPE.precoAnual + ' por ano</b><span class="muted" style="font-size:13px">Equivale a ' + STRIPE.anualPorMes + ' por mês.</span></div>';
+  h += '<div class="card pad" style="display:flex;flex-direction:column;gap:4px"><b style="font-size:17px">Plano mensal: ' + STRIPE.precoMensal + ' por mês</b><span class="muted" style="font-size:13px">Sem fidelidade. Cancela quando quiser.</span></div>';
+  var em = (AUTH.user && AUTH.user.email) || '';
+  h += '<p class="muted" style="margin:0;font-size:13px">Pagamento seguro pelo Stripe, em uma nova aba.' + (em ? ' O e-mail ' + esc(em) + ' já vai preenchido: é ele que liga o pagamento a esta conta, e o Premium é liberado sozinho depois da confirmação.' : '') + '</p>';
+  h += '<div class="actions"><button type="button" class="btn primary block" data-act="stripe-checkout" data-v="anual">Assinar plano anual</button><button type="button" class="btn block" data-act="stripe-checkout" data-v="mensal">Assinar plano mensal</button></div>';
   return h;
+};
+// Link do Stripe aberto num link de verdade, para quando o navegador bloquear a nova aba.
+SHEETS.stripeLink = function(sh){
+  var h = sheetHead('Abrir pagamento seguro');
+  h += '<p class="muted" style="margin:0">O navegador bloqueou a abertura automática. Toque no botão para abrir o Stripe em uma nova aba.</p>';
+  return h + '<div class="actions"><a class="btn primary block" href="' + esc(sh.url) + '" target="_blank" rel="noopener noreferrer">' + esc(sh.label || 'Abrir') + '</a><button type="button" class="btn block" data-act="close">Voltar ao PoupAí</button></div>';
+};
+function stripeUrl(base, kind){
+  var u = AUTH.user || {}, q = [];
+  if (u.email) q.push((kind === 'portal' ? 'prefilled_email' : 'locked_prefilled_email') + '=' + encodeURIComponent(u.email));
+  if (kind !== 'portal' && u.uid && /^[A-Za-z0-9_-]{1,200}$/.test(u.uid)) q.push('client_reference_id=' + encodeURIComponent(u.uid));
+  return base + (q.length ? '?' + q.join('&') : '');
+}
+function openStripe(url, label){
+  var w = null;
+  try { w = window.open(url, '_blank'); } catch (e) { w = null; }
+  if (w){ try { w.opener = null; } catch (e) {} return; }
+  openSheet({ type: 'stripeLink', url: url, label: label });
+}
+ACTIONS['stripe-checkout'] = function(el){
+  if (IS_PLAY) return toast('A assinatura pela Play Store chega em breve.');
+  if (MODE !== 'real' || !AUTH.user) return toast('Entre na sua conta para assinar.');
+  if (PREM.premium) return toast('Você já tem o Premium ativo.');
+  var plan = el && el.dataset.v === 'mensal' ? 'mensal' : 'anual';
+  openStripe(stripeUrl(STRIPE[plan], 'checkout'), plan === 'mensal' ? 'Abrir plano mensal' : 'Abrir plano anual');
+};
+ACTIONS['stripe-portal'] = function(){
+  if (IS_PLAY) return toast('Gerencie a assinatura pelo mesmo canal em que você assinou.');
+  openStripe(stripeUrl(STRIPE.portal, 'portal'), 'Abrir portal da assinatura');
 };
 SHEETS.fbDelete = function(sh){
   var u = AUTH.user || {}, g = isGoogleOnly(u);
   var h = sheetHead('Excluir conta');
   h += '<p class="muted" style="margin:0">Apaga para sempre todos os seus lançamentos, contas, parcelas, metas, investimentos e preferências, e também o seu login. Não dá para desfazer.</p>';
   h += '<div class="notice warn">Se quiser guardar uma cópia, baixe seus dados antes em Ajustes, Dados.</div>';
+  if (PREM.premium) h += IS_PLAY ? '<div class="notice warn"><strong>Você tem Premium ativo.</strong> Excluir a conta não cancela a cobrança automaticamente. Cancele a assinatura antes, pelo mesmo canal em que você assinou.</div>' : '<div class="notice warn"><strong>Você tem Premium ativo.</strong> Excluir a conta não cancela a cobrança automaticamente. <button type="button" class="link" data-act="stripe-portal">Cancele a assinatura primeiro.</button></div>';
   if (!g) h += '<div class="field"><label for="del-pass">Confirme sua senha</label><input class="input" id="del-pass" type="password" autocomplete="current-password" maxlength="128"></div>';
   else h += '<p class="muted" style="margin:0;font-size:13px">Para confirmar, o Google vai pedir para você entrar de novo.</p>';
   h += errBox(sh) + '<div class="actions"><button type="button" class="btn danger block" data-act="fb-delete-go"' + (sh.busy ? ' disabled' : '') + '>' + (sh.busy ? 'Excluindo…' : 'Excluir minha conta') + '</button><button type="button" class="btn block" data-act="close">Cancelar</button></div>';
@@ -4984,7 +5167,7 @@ function premiumState(){
   if (d > 0) return { tone: 'warn', badge: 'Teste gratuito', title: 'Teste gratuito.', detail: 'Faltam ' + cnt(d, 'dia', 'dias') + ' de acesso completo.' };
   return { tone: 'bad', badge: 'Plano gratuito', title: 'O teste gratuito terminou.', detail: 'O controle básico continua liberado. Investimentos, metas e análises ficam no Premium.' };
 }
-var LOCKED = { analise: ['chart', 'Análises inteligentes', 'Entenda o mês com score financeiro, alertas, gráficos e leitura clara do que está ajudando ou atrapalhando seu orçamento.'], metas: ['target', 'Metas financeiras', 'Transforme objetivos em números: quanto falta, quanto guardar por mês e quanto tempo falta para chegar lá.'], invest: ['trend', 'Investimentos e caixinhas', 'Veja seu patrimônio guardado, rendimento estimado, liquidez, retiradas e como seus investimentos mudam a sobra real do mês.'] };
+var LOCKED = { analise: ['chart', 'Análises inteligentes', 'Entenda o mês com score financeiro, alertas, gráficos e leitura clara do que está ajudando ou atrapalhando seu orçamento.'], metas: ['target', 'Metas financeiras', 'Transforme objetivos em números: quanto falta, quanto guardar por mês e quanto tempo falta para chegar lá.'], invest: ['trend', 'Investimentos e caixinhas', 'Veja seu patrimônio guardado, rendimento estimado, liquidez, retiradas e como seus investimentos mudam a sobra real do mês.'], ia: ['sparkles', 'Leitura com IA', 'Envie uma foto, print, notificação ou PDF e a IA transforma em lançamentos para você conferir e salvar.'] };
 function paywallHtml(route){
   var x = LOCKED[route], st = premiumState();
   return '<div class="paywall"><span class="gi">' + ic(x[0], 30) + '</span><h1>' + esc(x[1]) + '</h1><p class="muted">' + esc(x[2]) + '</p><div class="notice ' + st.tone + '" style="text-align:left"><strong>' + esc(st.title) + '</strong> ' + esc(st.detail) + '</div><button type="button" class="btn primary block" data-act="fb-premium">Ver vantagens do Premium</button><button type="button" class="btn block" data-act="go" data-v="home">Voltar para o início</button></div>';
@@ -5024,11 +5207,8 @@ function fbDadosHtml(){
 /* =================== Microfone: falar o gasto (Chrome e Edge; precisa de https ou localhost) =================== */
 var MIC = { on: false, rec: null };
 function micAvailable(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition) && window.isSecureContext; }
-// "52 reais e 30 centavos" vira "52,30"; o resto o leitor do lançamento rápido já entende.
-function micText(t){
-  return String(t || '').replace(/(\d+)\s*reais?\s*e\s*(\d{1,2})\s*centavos?/gi, function(_, a, b){ return a + ',' + (b.length === 1 ? '0' + b : b); })
-    .replace(/(\d+)\s*reais?\b/gi, '$1').replace(/R\$\s*/g, '').replace(/\s+/g, ' ').trim();
-}
+// O que foi falado passa pela mesma conversão do texto digitado (spokenMoney); o leitor do lançamento rápido entende o resto.
+function micText(t){ return spokenMoney(String(t || '').replace(/R\$\s*/g, 'R$')); }
 function micStop(){ try { if (MIC.rec) MIC.rec.stop(); } catch (e) {} }
 ACTIONS.mic = function(){
   if (MIC.on) return micStop();
@@ -5046,36 +5226,194 @@ ACTIONS.mic = function(){
   try { r.start(); MIC.on = true; MIC.rec = r; renderSheet(); } catch (e) { MIC.on = false; toast('Não consegui ligar o microfone.'); }
 };
 
-/* =================== Leitura com IA: foto, print ou PDF viram linhas da importação ===================
-   O arquivo vai para a Cloud Function iaLerArquivo, que confere login, plano e limite diário e chama o Gemini.
-   Nenhuma chave fica aqui. O resultado entra na tela de Importar, que compara com o que já existe antes de salvar. */
-var IA = { busy: false, fnRegion: 'us-central1', maxBytes: 6 * 1024 * 1024, maxSide: 2048 };
-function iaButtonHtml(){
-  return '<button type="button" class="btn sm block" data-act="ia-open"' + (IA.busy ? ' disabled' : '') + '>' + ic('sparkles', 16) + (IA.busy ? 'Lendo arquivo com IA…' : 'Ler foto, print ou PDF com IA') + '</button>';
+/* =================== Leitura com IA: tela própria ===================
+   Foto, print, notificação ou PDF vão para a Cloud Function iaLerArquivo, que confere login, plano,
+   limites e segurança e chama o Gemini. Nenhuma chave fica aqui. O resultado aparece numa revisão
+   própria e, ao salvar, usa o mesmo caminho de gravação da importação (importConfirm), que já trata
+   gastos, entradas, contas do mês, parcelas e valores guardados. */
+var IA = { busy: false, fnRegion: 'us-central1', maxBytes: 6 * 1024 * 1024, maxImgIn: 25 * 1024 * 1024, maxSide: 2048, gapMs: 20000, lastAt: 0, restantes: null };
+var IA_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf';
+(function(){
+  try {
+    var st = document.createElement('style');
+    st.textContent = '@keyframes iapulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.12);opacity:.65}}.ia-pulse{animation:iapulse 1.4s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.ia-pulse{animation:none}}' +
+      '.ia-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}.ia-row:first-child{border-top:0}.ia-row.off .ia-body,.ia-row.off .v{opacity:.55}' +
+      '.ia-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit}' +
+      '.ia-body .t{font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ia-body .s{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ia-body .n{font-size:12px;color:var(--muted);white-space:normal}';
+    document.head.appendChild(st);
+  } catch (e) {}
+})();
+function iaState(){ return UI.ia || (UI.ia = { stage: 'start', file: '', rows: null, info: null, msg: '' }); }
+function iaButtonHtml(){ return '<button type="button" class="btn sm block" data-act="ia-open">' + ic('sparkles', 16) + 'Ler foto, print ou PDF com IA</button>'; }
+function iaDests(){ return P.investments.map(function(x){ return ['inv:' + x.id, 'Investimento: ' + x.name]; }).concat(P.goals.map(function(g){ return ['goal:' + g.id, 'Meta: ' + g.name]; })); }
+function iaTouch(){ try { return window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } }
+
+/* ---- tela ---- */
+function scrIa(){
+  var S = iaState();
+  var h = backHead('Ler com IA', 'Envie uma foto, print, notificação ou PDF. A IA encontra os lançamentos e você confere antes de salvar.');
+  if (MODE === 'real' && !canSave()) h += '<div class="notice warn">O app está em modo leitura: o que você salvar aqui não vai para o servidor.</div>';
+  if (S.stage === 'reading') return h + iaReadingHtml(S);
+  if (S.stage === 'review' && S.rows) return h + iaReviewHtml(S);
+  return h + iaStartHtml(S);
 }
-function iaImportCardHtml(I){
+function iaStartHtml(S){
   var h = '';
-  if (I.iaBusy) h += '<div class="notice info" role="status"><strong>Lendo ' + esc(I.iaFile || 'o arquivo') + ' com IA…</strong> Leva alguns segundos. Depois você revisa cada linha antes de salvar.</div>';
-  return h + '<button type="button" class="card pad" style="display:flex;gap:12px;align-items:center;text-align:left;width:100%" data-act="ia-open"' + (IA.busy ? ' disabled' : '') + '><span class="ic" style="background:var(--accent-soft);color:var(--accent)">' + ic('sparkles', 19) + '</span><span class="main2" style="display:flex;flex-direction:column;gap:2px"><b>Foto, print ou PDF com IA</b><span class="muted" style="font-size:13px">' + (isPremium() ? 'Comprovante, fatura ou extrato. A IA lê e você confere antes de salvar.' : 'Faz parte do Premium.') + '</span></span>' + ic('next', 16) + '</button>';
+  if (S.msg) h += '<div class="notice bad" role="alert">' + esc(S.msg) + '</div>';
+  h += '<div class="drop" id="ia-drop" style="gap:12px;padding:26px 16px">' +
+    '<span class="ic" style="width:56px;height:56px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent)">' + ic('sparkles', 28) + '</span>' +
+    '<b style="font-size:16.5px">O que a IA vai ler?</b>' +
+    '<span class="muted" style="font-size:13px">Foto, print ou PDF · até 6 MB · PDF com até 15 páginas</span>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:420px">' +
+      (iaTouch() ? '<button type="button" class="btn primary" style="flex:1;min-width:140px" data-act="ia-pick" data-v="camera">' + ic('camera', 18) + 'Tirar foto</button>' : '') +
+      '<button type="button" class="btn' + (iaTouch() ? '' : ' primary') + '" style="flex:1;min-width:140px" data-act="ia-pick">' + ic('upload', 18) + 'Escolher arquivo</button>' +
+    '</div>' + (iaTouch() ? '' : '<span class="faint" style="font-size:12.5px">ou arraste o arquivo para cá</span>') + '</div>';
+  h += '<section class="sec"><h2>Funciona com</h2><div class="list">' + [
+    ['bell', 'Notificações do banco', 'Várias de uma vez, mesmo misturadas com as de outros apps: cada pagamento vira uma linha.'],
+    ['card', 'Prints do app do banco ou do cartão', 'Lista de compras, detalhe de uma compra ou fatura.'],
+    ['pix', 'Comprovantes', 'Pix, transferência, boleto e pagamento de contas.'],
+    ['file', 'Extratos e faturas em PDF', 'Até 15 páginas por vez, sem senha. Cada movimentação vira uma linha.'],
+    ['bill', 'Notas fiscais e recibos', 'Foto do papel ou print. Vira um lançamento com o total.']
+  ].map(function(x){ return '<div class="item"><span class="ic">' + ic(x[0], 19) + '</span><span class="main2"><span class="t">' + esc(x[1]) + '</span><span class="s" style="white-space:normal">' + esc(x[2]) + '</span></span></div>'; }).join('') + '</div></section>';
+  h += '<div class="notice info">Até 10 leituras por dia' + (typeof IA.restantes === 'number' ? ' (restam ' + IA.restantes + ' hoje)' : '') + ', com intervalo de 20 segundos entre uma e outra. O arquivo é lido e descartado na hora: nada fica guardado.</div>';
+  h += '<p class="muted" style="margin:0;font-size:13px">Planilhas, CSV e OFX vão pela tela <button type="button" class="link" data-act="go" data-v="importar">Importar</button>.</p>';
+  return h;
 }
-function iaReviewNotice(I){
-  var x = I.ia || {};
-  return '<div class="notice warn" role="note"><strong>Lido com IA.</strong> Confira valor, data e descrição de cada linha: a leitura automática pode errar.' +
-    (x.aviso ? ' ' + esc(x.aviso) : '') + (x.truncado ? ' Vieram só os primeiros 50 lançamentos; envie o restante em outro arquivo.' : '') +
-    (typeof x.restantes === 'number' ? ' ' + (x.restantes > 0 ? 'Você ainda tem ' + cnt(x.restantes, 'leitura', 'leituras') + ' com IA hoje.' : 'Esta foi sua última leitura com IA de hoje.') : '') + '</div>';
+function iaReadingHtml(S){
+  return '<div class="card pad" role="status" aria-live="polite" style="display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:32px 18px">' +
+    '<span class="ic ia-pulse" style="width:60px;height:60px;border-radius:20px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent)">' + ic('sparkles', 30) + '</span>' +
+    '<b style="font-size:16.5px">Lendo ' + esc(S.file || 'o arquivo') + '…</b>' +
+    '<span class="muted" style="font-size:13.5px;max-width:360px">A IA está procurando compras, pagamentos e recebimentos. Isso leva alguns segundos; pode continuar usando o app.</span></div>';
 }
-ACTIONS['ia-open'] = function(){
-  if (MODE !== 'real' || !AUTH.user) return toast('Entre na sua conta para ler arquivos com IA.');
-  if (!isPremium()) return openSheet({ type: 'fbPremium' });
+var IA_TIPO = { gasto: ['Gasto', ''], entrada: ['Entrada', 'good'], conta: ['Conta do mês', 'warn'], novaconta: ['Conta fixa nova', 'warn'], parcela: ['Parcela', 'info'], guardar: ['Guardado', 'accent'], ignorar: ['Fora', ''] };
+function iaRowHtml(r, i){
+  var t = IA_TIPO[r.type] || IA_TIPO.gasto, label = r.type === 'parcela' ? 'Parcela ' + (r.parcAtual || 1) + '/' + (r.parcTotal || 2) : t[0];
+  var sub = [isDate(r.date) ? fmtDay(r.date) : 'Sem data', r.type === 'gasto' || r.type === 'novaconta' ? METHOD[r.method] || '' : '', r.bank || ''].filter(Boolean).join(' · ');
+  var pills = (r.on ? (r.type === 'gasto' ? '' : '<span class="pill ' + t[1] + '">' + esc(label) + '</span>') : '<span class="pill bad">' + esc(r.badge || 'Fora') + '</span>') + (r.maybeDup && r.on ? '<span class="pill warn">Pode ser repetido</span>' : '') + (r.conf === 'baixa' && r.on && !r.maybeDup ? '<span class="pill warn">Confira</span>' : '') + (r.edited ? '<span class="pill">Editado</span>' : '');
+  var note = !r.on || r.maybeDup || ['conta', 'novaconta', 'parcela', 'guardar'].indexOf(r.type) >= 0 || (r.conf === 'baixa' && !r.edited) ? r.note : '';
+  return '<div class="ia-row' + (r.on ? '' : ' off') + '">' +
+    '<button type="button" class="iconbtn" style="width:36px;height:36px;flex:none" data-act="ia-toggle" data-i="' + i + '" aria-pressed="' + !!r.on + '" aria-label="' + (r.on ? 'Deixar de fora: ' : 'Incluir: ') + esc(r.desc) + '"><span class="ic" style="width:24px;height:24px;border-radius:7px;' + (r.on ? 'background:var(--accent);color:var(--accent-ink)' : 'border:1.5px solid var(--line-2);background:var(--surface);color:transparent') + '">' + ic('check', 14) + '</span></button>' +
+    '<button type="button" class="ia-body" data-act="ia-edit" data-i="' + i + '" aria-label="Editar ' + esc(r.desc) + '"><span class="t">' + esc(r.desc) + '</span><span class="s">' + esc(sub) + '</span>' + (pills ? '<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:3px">' + pills + '</span>' : '') + (note ? '<span class="n">' + esc(note) + '</span>' : '') + '</button>' +
+    '<span class="v" style="font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap' + (r.type === 'entrada' ? ';color:var(--good)' : '') + '">' + (r.type === 'entrada' ? '+' : '') + money(r.amount) + '</span></div>';
+}
+function iaReviewHtml(S){
+  var rows = S.rows, on = rows.filter(function(r){ return r.on; }), x = S.info || {};
+  var out = sum(on.filter(function(r){ return r.type !== 'entrada'; }), function(r){ return r.amount; }), inn = sum(on.filter(function(r){ return r.type === 'entrada'; }), function(r){ return r.amount; });
+  var h = '<div class="card pad" style="display:flex;flex-direction:column;gap:6px">' +
+    '<div style="display:flex;align-items:center;gap:10px"><span class="ic" style="width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent);flex:none">' + ic('sparkles', 20) + '</span>' +
+    '<span style="display:flex;flex-direction:column;min-width:0"><b style="font-size:16px">' + cnt(rows.length, 'lançamento encontrado', 'lançamentos encontrados') + '</b><span class="muted" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(S.file) + '</span></span></div>' +
+    '<span class="muted" style="font-size:13px">Selecionados: ' + cnt(on.length, 'linha', 'linhas') + (out ? ' · saídas ' + money(out) : '') + (inn ? ' · entradas ' + money(inn) : '') + '</span></div>';
+  if (x.aviso || x.truncado) h += '<div class="notice warn"><strong>Atenção:</strong> ' + esc([x.aviso, x.truncado ? 'Vieram só os primeiros 100 lançamentos' + (x.vistas > 100 ? ' de ' + x.vistas : '') + '; envie o restante em outro arquivo.' : ''].filter(Boolean).join(' ')) + '</div>';
+  var nDup = on.filter(function(r){ return r.maybeDup; }).length;
+  if (nDup) h += '<div class="notice warn">' + (nDup === 1 ? '1 lançamento parece repetido' : nDup + ' lançamentos parecem repetidos') + '. Confira os marcados com <strong>Pode ser repetido</strong> e desmarque o que já estava no app.</div>';
+  h += '<p class="muted" style="margin:0;font-size:13px">A leitura automática pode errar. Toque numa linha para conferir ou editar; use a caixa para incluir ou deixar de fora. O que já existe no app vem desmarcado.</p>';
+  if (rows.length > 1) h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sm" data-act="ia-all" data-v="on">' + ic('check', 16) + 'Marcar todas</button><button type="button" class="btn sm" data-act="ia-all" data-v="off">Desmarcar todas</button></div>';
+  h += '<div class="card" style="padding:0;overflow:hidden">' + rows.map(iaRowHtml).join('') + '</div>';
+  h += '<div class="stickybar" style="display:flex;gap:8px"><button type="button" class="btn" data-act="ia-discard" style="flex:1">Descartar</button><button type="button" class="btn primary" data-act="ia-save" style="flex:2"' + (on.length ? '' : ' disabled') + '>Salvar ' + cnt(on.length, 'lançamento', 'lançamentos') + '</button></div>';
+  return h;
+}
+
+/* ---- folha de edição de uma linha ---- */
+SHEETS.iaEdit = function(sh){
+  var f = sh.f, m = isDate(f.date) ? f.date.slice(0, 7) : curMonth(), bills = activeBills(m), dests = iaDests();
+  var tipos = [['gasto', 'Gasto'], ['entrada', 'Entrada'], ['parcela', 'Parcela']];
+  if (bills.length) tipos.push(['conta', 'Conta do mês']);
+  if (dests.length) tipos.push(['guardar', 'Guardado']);
+  var h = sheetHead('Conferir lançamento');
+  if (sh.conf === 'baixa') h += '<div class="notice warn">A IA não teve certeza da leitura desta linha. Confira com o documento.</div>';
+  var rowNow = UI.ia && UI.ia.rows && UI.ia.rows[sh.i]; if (rowNow && rowNow.maybeDup) h += '<div class="notice warn">' + esc(rowNow.note) + '</div>';
+  h += textField('desc', 'Descrição', f.desc, 'Ex.: Mercado', 60);
+  h += '<div class="row2">' + moneyField('val', f.tipo === 'parcela' ? 'Valor da parcela' : 'Valor', f.val) + dateField('date', 'Data', f.date) + '</div>';
+  h += chipRow('tipo', tipos, f.tipo, 'O que é');
+  if (f.tipo === 'parcela') h += '<div class="row2">' + textField('pa', 'Parcela atual', f.pa, '1', 3, '', 'numeric') + textField('pt', 'Total de parcelas', f.pt, '2', 3, '', 'numeric') + '</div>';
+  if (f.tipo === 'conta') h += selectField('billId', 'Qual conta', bills.map(function(b){ return [b.id, b.name + (paymentOf(m, b.id) ? ' (já paga)' : '')]; }), f.billId || bills[0].id);
+  if (f.tipo === 'guardar') h += selectField('ref', 'Para onde', dests, f.ref || dests[0][0]);
+  if (f.tipo === 'gasto' || f.tipo === 'parcela') h += selectField('cat', 'Categoria', CATS.map(function(c){ return [c.id, c.name]; }), f.cat);
+  if (f.tipo === 'gasto') h += selectField('method', 'Como pagou', METHODS.map(function(x){ return [x.id, x.name]; }), f.method);
+  h += errBox(sh) + '<div class="actions"><button type="button" class="btn primary block" data-act="ia-edit-save">Aplicar</button><button type="button" class="btn danger block" data-act="ia-edit-del">' + ic('trash', 16) + 'Tirar da lista</button></div>';
+  return h;
+};
+
+/* ---- ações ---- */
+function iaGate(){
+  if (MODE !== 'real' || !AUTH.user){ toast('Entre na sua conta para ler arquivos com IA.'); return false; }
+  if (!isPremium()){ openSheet({ type: 'fbPremium' }); return false; }
+  return true;
+}
+// Abre a escolha do arquivo. Precisa rodar dentro do toque da pessoa, por isso o campo é criado aqui mesmo.
+function iaPick(camera){
+  var S = iaState();
   if (IA.busy) return toast('Ainda estou lendo o arquivo anterior.');
-  // campo de arquivo temporário: abre a escolha de foto ou PDF sem mexer no resto da tela
+  if (S.stage === 'review' && S.rows) return toast('Salve ou descarte a revisão atual antes de enviar outro arquivo.');
   var inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf'; inp.className = 'sr'; inp.setAttribute('aria-hidden', 'true'); inp.tabIndex = -1;
+  inp.type = 'file'; inp.accept = camera ? 'image/*' : IA_ACCEPT; if (camera) inp.setAttribute('capture', 'environment');
+  inp.className = 'sr'; inp.setAttribute('aria-hidden', 'true'); inp.tabIndex = -1;
   inp.addEventListener('change', function(){ var f = inp.files && inp.files[0]; if (inp.parentNode) inp.parentNode.removeChild(inp); if (f) iaFile(f); });
   document.body.appendChild(inp);
   setTimeout(function(){ if (inp.parentNode) inp.parentNode.removeChild(inp); }, 10 * 60 * 1000);
   inp.click();
+}
+ACTIONS['ia-open'] = function(){
+  if (!iaGate()) return;
+  var S = iaState(), pick = !IA.busy && !(S.stage === 'review' && S.rows);
+  UI.sheet = null; go('ia');
+  if (pick) iaPick(false);
 };
+ACTIONS['ia-pick'] = function(el){ if (iaGate()) iaPick(el && el.dataset.v === 'camera'); };
+ACTIONS['ia-toggle'] = function(el){
+  var S = UI.ia, r = S && S.rows && S.rows[+el.dataset.i]; if (!r) return;
+  if (!r.on && r.locked) return toast(r.note || 'Essa linha não pode ser importada.');
+  r.on = !r.on;
+  if (r.on && r.type === 'ignorar') r.type = r.iaTipo === 'entrada' ? 'entrada' : 'gasto';
+  render();
+};
+// Marcar todas inclui só o que o app não marcou como repetido ou já existente; essas linhas continuam a critério da pessoa.
+ACTIONS['ia-all'] = function(el){
+  var S = UI.ia; if (!S || !S.rows) return;
+  var on = el.dataset.v === 'on';
+  S.rows.forEach(function(r){ if (!on) r.on = false; else if (r.auto || r.edited) r.on = true; });
+  render();
+};
+ACTIONS['ia-edit'] = function(el){
+  var S = UI.ia, i = +el.dataset.i, r = S && S.rows && S.rows[i]; if (!r) return;
+  openSheet({ type: 'iaEdit', i: i, conf: r.conf, f: { desc: r.desc, val: moneyPlain(r.amount), date: isDate(r.date) ? r.date : today(), tipo: r.type === 'ignorar' || r.type === 'novaconta' ? (r.iaTipo === 'entrada' ? 'entrada' : 'gasto') : r.type, cat: r.cat || 'outros', method: r.method || P.prefs.defaultMethod || 'pix', pa: String(r.parcAtual || 1), pt: String(r.parcTotal || 2), billId: r.billId || '', ref: r.ref || '' } });
+};
+ACTIONS['ia-edit-save'] = function(){
+  var sh = UI.sheet, S = UI.ia, r = sh && S && S.rows && S.rows[sh.i]; if (!r){ closeSheet(); return; }
+  var f = sh.f, v = parseMoney(f.val), desc = cleanText(f.desc, 60);
+  if (!desc) return setErr('Informe a descrição.');
+  if (!(v > 0)) return setErr('Informe um valor maior que zero, por exemplo 52,30.');
+  if (!isDate(f.date)) return setErr('Informe a data.');
+  var m = f.date.slice(0, 7);
+  if (!importMonthOk(m)) return setErr('Use uma data dos últimos 24 meses até o mês que vem.');
+  r.desc = desc; r.amount = r2(v); r.date = f.date; r.type = f.tipo; r.locked = false; r.on = true; r.edited = true; r.maybeDup = false;
+  if (f.cat && f.cat !== r.cat){ r.cat = CAT[f.cat] ? f.cat : 'outros'; r.catTouched = true; }
+  if (METHOD[f.method]) r.method = f.method;
+  if (f.tipo === 'parcela'){ var tt = clamp(parseInt(f.pt, 10) || 2, 2, 120); r.parcTotal = tt; r.parcAtual = clamp(parseInt(f.pa, 10) || 1, 1, tt); }
+  if (f.tipo === 'conta'){ var bs = activeBills(m), b = bs.filter(function(x){ return x.id === f.billId; })[0] || bs[0]; r.billId = b ? b.id : ''; if (!b) r.type = 'gasto'; }
+  if (f.tipo === 'guardar'){ var ds = iaDests(), d = ds.filter(function(x){ return x[0] === f.ref; })[0] || ds[0]; r.ref = d ? d[0] : ''; if (!d) r.type = 'gasto'; }
+  r.note = r.type === 'conta' ? 'Será marcada como paga em ' + monthName(m) + '.' : r.type === 'parcela' ? 'Entra sozinha nos próximos meses.' : r.type === 'guardar' ? 'Conta como guardado, não como gasto.' : '';
+  UI.sheet = null; render();
+};
+ACTIONS['ia-edit-del'] = function(){
+  var sh = UI.sheet, S = UI.ia;
+  if (sh && S && S.rows) S.rows.splice(sh.i, 1);
+  UI.sheet = null;
+  if (S && S.rows && !S.rows.length){ S.rows = null; S.stage = 'start'; S.msg = ''; toast('Todas as linhas foram tiradas da lista.'); }
+  render();
+};
+ACTIONS['ia-discard'] = function(){ UI.ia = null; render(); toast('Leitura descartada.'); };
+ACTIONS['ia-save'] = function(){
+  var S = UI.ia; if (!S || !S.rows) return;
+  var rows = S.rows.filter(function(r){ return r.on && r.type !== 'ignorar'; });
+  if (!rows.length) return toast('Marque pelo menos uma linha.');
+  var keep = UI.imp;
+  UI.imp = { mode: 'auto', rows: rows, skipped: 0, bulk: false, sel: {}, msg: '' };
+  UI.ia = null;
+  try { importConfirm(); } finally { UI.imp = keep; }
+};
+
+/* ---- leitura do arquivo ---- */
 function iaMimeOf(file){
   var t = String(file.type || '').toLowerCase(), ext = (String(file.name || '').split('.').pop() || '').toLowerCase();
   if (t === 'application/pdf' || ext === 'pdf') return 'application/pdf';
@@ -5098,7 +5436,7 @@ function iaShrink(file){
         var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, IA.maxSide / Math.max(w, h));
         var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
         var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
-        c.toBlob(function(b){ URL.revokeObjectURL(url); res(b && b.size ? { blob: b, mime: 'image/jpeg' } : null); }, 'image/jpeg', 0.85);
+        c.toBlob(function(b){ URL.revokeObjectURL(url); res(b && b.size ? { blob: b, mime: 'image/jpeg' } : null); }, 'image/jpeg', 0.88);
       } catch (e) { URL.revokeObjectURL(url); res(null); }
     };
     img.onerror = function(){ URL.revokeObjectURL(url); res(null); };
@@ -5107,59 +5445,97 @@ function iaShrink(file){
 }
 function iaErrorText(e){
   var code = String((e && e.code) || '').replace(/^functions\//, ''), msg = String((e && e.message) || '');
-  if (['resource-exhausted', 'invalid-argument', 'permission-denied', 'unauthenticated', 'unavailable'].indexOf(code) >= 0 && msg && !/^(internal|INTERNAL)$/.test(msg)) return msg;
+  if (['resource-exhausted', 'invalid-argument', 'permission-denied', 'unauthenticated', 'unavailable', 'already-exists', 'failed-precondition'].indexOf(code) >= 0 && msg && !/^(internal|INTERNAL)$/.test(msg)) return msg;
   if (code === 'deadline-exceeded') return 'A leitura demorou demais. Tente um arquivo menor ou uma foto só da parte com os lançamentos.';
   if (code === 'not-found') return 'A leitura com IA ainda não está publicada no servidor.';
   if (!navigator.onLine) return 'Sem internet. Conecte e tente de novo.';
   return 'A leitura com IA falhou. Tente de novo em instantes.';
 }
-// Converte o que a IA leu no formato que a importação já entende (mesmo caminho de CSV e OFX).
+function iaFail(msg){ var S = iaState(); S.stage = 'start'; S.msg = msg; S.rows = null; if (UI.route === 'ia') render(); else go('ia'); }
+// Converte o que a IA leu no formato que a importação já entende, para aproveitar a comparação com o que já existe.
 function iaToBase(it, tipoDoc){
   var fatura = tipoDoc === 'fatura_cartao', entrada = it.tipo === 'entrada';
   var desc = cleanText(it.descricao, 80) || 'Lançamento';
   var forma = { pix: 'pix', debito: 'debito', credito: 'credito', boleto: 'boleto', dinheiro: 'dinheiro' }[it.forma] || '';
   var parc = it.parcela_total >= 2 ? 'parcela ' + it.parcela_atual + '/' + it.parcela_total : '';
   return { date: isDate(it.data) ? it.data : '', desc: desc, amount: r2(Math.abs(Number(it.valor) || 0)), sign: (entrada || fatura) ? 1 : -1, orig: false,
-    line: [desc, forma, parc].filter(Boolean).join(' '), catCell: cleanText(it.categoria, 30), typeCell: entrada ? 'entrada' : 'gasto', instText: parc,
+    line: [desc, cleanText(it.instituicao, 30), forma, parc].filter(Boolean).join(' '), catCell: cleanText(it.categoria, 30), typeCell: entrada ? 'entrada' : 'gasto', instText: parc,
     nCell: '', nparcCell: '', startCell: '', periodCell: '', rateCell: '', liqCell: '', dueCell: '', amtHeader: '' };
 }
+function iaRows(itens, tipoDoc){
+  var rows = classifyStatement(itens.map(function(it){ return iaToBase(it, tipoDoc); })), dests = iaDests();
+  rows.forEach(function(r, k){
+    var it = itens[k] || {};
+    r.iaTipo = it.tipo; r.conf = it.confianca;
+    if (!isDate(it.data)){ r.conf = 'baixa'; r.note = 'Sem data no documento: ficou com a data de hoje.'; }
+    else if (it.confianca === 'baixa' && r.type !== 'ignorar') r.note = 'A IA não teve certeza da leitura. Toque para conferir.';
+    if (it.tipo === 'guardado' && r.type !== 'ignorar'){
+      if (dests.length){ r.type = 'guardar'; r.ref = r.ref || dests[0][0]; r.badge = 'Dinheiro guardado'; r.note = 'Conta como guardado, não como gasto.'; }
+      else { r.type = 'ignorar'; r.badge = 'Dinheiro guardado'; r.note = 'Para registrar valores guardados, cadastre uma meta ou um investimento. Ou toque para lançar como outro tipo.'; }
+    }
+    r.on = r.type !== 'ignorar'; r.auto = r.on;
+  });
+  // Alerta de possível repetido: parecido com algo já salvo (até 7 dias) ou com outra linha desta mesma leitura.
+  rows.forEach(function(r, k){
+    if (!r.on || r.type === 'guardar' || !isDate(r.date)) return;
+    var inc = r.type === 'entrada', base = inc ? extrasNear(r.date, 7) : expensesNear(r.date, 7);
+    var hit = findMaybeRepeat(base, r.desc, r.amount, r.date), why = '';
+    if (hit) why = 'Parecido com ' + hit.desc + ' · ' + money(hit.amount) + ' em ' + fmtDay(hit.date) + ', que já está no app.';
+    else {
+      var twin = rows.slice(0, k).filter(function(o){ return o.on && (o.type === 'entrada') === inc && isDate(o.date) && Math.abs(daysBetween(o.date, r.date)) <= 1 && Math.abs(o.amount - r.amount) < 0.005 && (similarName(o.desc, r.desc) || oddCents(r.amount)); })[0];
+      if (twin) why = 'Mesmo valor e data de ' + twin.desc + ', mais acima nesta leitura. Pode ser a mesma notificação duas vezes.';
+    }
+    if (why){ r.maybeDup = true; r.note = why + ' Se for repetido, desmarque.'; }
+  });
+  return rows;
+}
 async function iaFile(file){
+  var S = iaState();
+  if (IA.busy) return toast('Ainda estou lendo o arquivo anterior.');
+  if (S.stage === 'review' && S.rows) return toast('Salve ou descarte a revisão atual antes de enviar outro arquivo.');
+  var wait = IA.gapMs - (Date.now() - IA.lastAt);
+  if (wait > 0) return toast('Espere ' + Math.ceil(wait / 1000) + ' segundos antes de enviar outro arquivo.');
   var mime = iaMimeOf(file);
-  if (!mime) return toast('Use uma foto (JPG, PNG, WEBP ou HEIC) ou um PDF.');
-  if (IA.busy) return;
-  var I = { mode: 'auto', text: '', file: '', iaFile: cleanText(file.name, 60), rows: null, skipped: 0, bulk: false, sel: {}, msg: '', busy: false, iaBusy: true, source: '' };
-  IA.busy = true; UI.imp = I;
-  if (UI.route === 'importar'){ UI.sheet = null; render(); } else go('importar');
+  if (!mime) return iaFail(/\.(csv|xlsx?|ods|ofx|qfx|txt|tsv|json)$/i.test(file.name || '') ? 'Planilhas, CSV, TXT e OFX vão pela tela Importar. Aqui a IA lê fotos, prints e PDFs.' : 'Formato não aceito. Envie uma foto ou print (JPG, PNG, WEBP ou HEIC) ou um PDF.');
+  if (file.size < 100) return iaFail('O arquivo está vazio.');
+  if (mime === 'application/pdf' && file.size > IA.maxBytes) return iaFail('PDF grande demais. Use até 6 MB ou envie só as páginas com os lançamentos.');
+  if (mime !== 'application/pdf' && file.size > IA.maxImgIn) return iaFail('Imagem grande demais. Use uma foto ou print de até 25 MB.');
+  if (mime === 'application/pdf'){
+    try { var pb = await file.arrayBuffer(), pt = new TextDecoder('latin1').decode(new Uint8Array(pb, Math.max(0, pb.byteLength - 65536))); if (/\/Encrypt\s/.test(pt)) return iaFail('Esse PDF está protegido por senha. Abra no celular ou no computador, salve uma cópia sem senha (ou tire prints das páginas) e envie de novo.'); } catch (e) {}
+  }
+  IA.busy = true; IA.lastAt = Date.now();
+  S.stage = 'reading'; S.file = cleanText(file.name, 60) || 'arquivo'; S.msg = ''; S.rows = null; S.info = null;
+  if (UI.route === 'ia') render(); else go('ia');
   try {
     var blob = file, sendMime = mime;
     if (/^image\/(jpeg|png|webp)$/.test(mime) || (/^image\/hei[cf]$/.test(mime) && file.size > IA.maxBytes)){
       var sm = await iaShrink(file);
       if (sm && (sm.blob.size < file.size || mime !== 'image/jpeg')){ blob = sm.blob; sendMime = sm.mime; }
     }
-    if (blob.size > IA.maxBytes) throw { code: 'invalid-argument', message: 'Arquivo grande demais. Use até 6 MB.' };
+    if (blob.size > IA.maxBytes) throw { code: 'invalid-argument', message: 'Arquivo grande demais depois de reduzido. Use até 6 MB.' };
     var b64 = await iaBlobToBase64(blob);
     await fbInit();
     var fm = await import(FB_SDK + 'firebase-functions.js');
     var call = fm.httpsCallable(fm.getFunctions(FX.app, IA.fnRegion), 'iaLerArquivo', { timeout: 130000 });
     var res = await call({ mime: sendMime, arquivo: b64 });
     var d = (res && res.data) || {}, itens = Array.isArray(d.itens) ? d.itens : [];
-    I.iaBusy = false;
+    if (typeof d.restantes === 'number') IA.restantes = d.restantes;
     if (!itens.length){
-      I.msg = (d.tipo === 'nao_financeiro' ? 'Esse arquivo não parece um comprovante, fatura ou extrato.' : 'Não encontrei lançamentos nesse arquivo.') + (d.aviso ? ' ' + d.aviso : '') + (typeof d.restantes === 'number' ? ' Restam ' + cnt(d.restantes, 'leitura', 'leituras') + ' com IA hoje.' : '');
+      S.stage = 'start';
+      S.msg = (d.tipo === 'nao_financeiro' ? 'Não encontrei compras, pagamentos ou recebimentos nesse arquivo.' : 'Não encontrei lançamentos nesse arquivo.') + (d.aviso ? ' ' + d.aviso : '') + ' Se o print tiver mais de uma tela, envie a parte com os valores.';
     } else {
-      I.rows = classifyStatement(itens.map(function(it){ return iaToBase(it, d.tipo); }));
-      I.source = 'IA'; I.ia = { aviso: d.aviso || '', truncado: !!d.truncado, restantes: d.restantes };
+      S.rows = iaRows(itens, d.tipo); S.info = { aviso: d.aviso || '', truncado: !!d.truncado, vistas: d.vistas || 0, tipo: d.tipo }; S.stage = 'review';
     }
   } catch (e) {
-    I.iaBusy = false;
-    if (String((e && e.code) || '').replace(/^functions\//, '') === 'permission-denied' && !isPremium()){ IA.busy = false; if (UI.imp === I) render(); return openSheet({ type: 'fbPremium' }); }
-    I.msg = iaErrorText(e);
-    console.warn('[PoupAí] Leitura com IA:', e && e.code);
+    var code = String((e && e.code) || '').replace(/^functions\//, '');
+    S.stage = 'start'; S.rows = null;
+    if (code === 'permission-denied' && !isPremium()){ IA.busy = false; S.msg = ''; render(); return openSheet({ type: 'fbPremium' }); }
+    S.msg = iaErrorText(e);
+    console.warn('[PoupAí] Leitura com IA:', code);
   }
   IA.busy = false;
-  if (UI.imp !== I) return toast(I.rows ? 'A leitura com IA terminou, mas você saiu de Importar. Envie o arquivo de novo para revisar.' : (I.msg || 'A leitura com IA terminou.'));
-  if (UI.route === 'importar'){ render(); window.scrollTo(0, 0); }
-  else toast(I.rows ? 'Leitura com IA pronta. Abra Importar para revisar.' : I.msg);
+  if (UI.route === 'ia'){ render(); window.scrollTo(0, 0); }
+  else toast(S.stage === 'review' ? 'Leitura com IA pronta. Abra Ler com IA para revisar.' : (S.msg || 'A leitura com IA terminou.'));
 }
 
 /* =================== Início do app =================== */
