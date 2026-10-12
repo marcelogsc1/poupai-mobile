@@ -255,6 +255,7 @@ details.adv summary{cursor:pointer;font-weight:700;font-size:13.5px;min-height:4
 
 .overlay{position:fixed;inset:0;z-index:50;background:var(--overlay);display:flex;align-items:flex-end;justify-content:center}
 .sheet{background:var(--bg);width:100%;max-width:560px;max-height:92%;overflow-y:auto;border-radius:22px 22px 0 0;padding:18px 18px calc(22px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:16px;box-shadow:var(--shadow)}
+.sheet > *{flex-shrink:0} /* listas com overflow:hidden não podem encolher dentro da folha com rolagem */
 .sheet.wide{max-width:760px}
 .sheet-head{display:flex;align-items:center;gap:8px}
 .sheet-head h2{font-size:18px;flex:1;text-wrap:balance}
@@ -951,7 +952,7 @@ var HOME_BLOCKS = [
   { id: 'limits', name: 'Limites do dia a dia' }, { id: 'parcelas', name: 'Parcelas' }, { id: 'metas', name: 'Metas' },
   { id: 'invest', name: 'Investimentos' }, { id: 'proximos', name: 'Próximos meses' }
 ];
-function defaultPrefs(){ var h = {}; HOME_BLOCKS.forEach(function(b){ h[b.id] = ['score', 'metas', 'invest', 'proximos'].indexOf(b.id) < 0; }); return { theme: 'auto', payMode: 'simple', defaultMethod: 'pix', pixCreditNext: true, alertDays: 3, home: h, pinned: [] }; }
+function defaultPrefs(){ var h = {}; HOME_BLOCKS.forEach(function(b){ h[b.id] = ['score', 'metas', 'invest', 'proximos'].indexOf(b.id) < 0; }); return { theme: 'auto', payMode: 'simple', defaultMethod: 'pix', launchMethod: '', pixCreditNext: true, alertDays: 3, home: h, pinned: [] }; }
 function emptyProfile(){ return { v: 2, name: '', avatar: '', incomes: [], saveTarget: 0, rates: Object.assign({}, DEFAULT_RATES), limits: {}, bills: [], installments: [], goals: [], investments: [], cats: { over: {}, custom: [] }, cards: [], prefs: defaultPrefs(), learn: {}, dupOk: [], setup: { done: false, start: '' }, createdAt: today() }; }
 function emptyMonth(){ return { expenses: [], payments: [], extras: [], saves: [], skips: [] }; }
 var P = emptyProfile();
@@ -1036,6 +1037,7 @@ function sProfile(o){
       theme: ['auto','light','dark'].indexOf(pr.theme) >= 0 ? pr.theme : 'auto',
       payMode: ['simple','credit','account','mixed'].indexOf(pr.payMode) >= 0 ? pr.payMode : 'simple',
       defaultMethod: sMethod(pr.defaultMethod) || 'pix',
+      launchMethod: sMethod(pr.launchMethod),
       pixCreditNext: sBool(pr.pixCreditNext, true),
       alertDays: Math.round(sNum(pr.alertDays == null ? 3 : pr.alertDays, 0, 10)),
       checklistOff: sBool(pr.checklistOff, false), home: {}, pinned: sArr(pr.pinned, 2).map(sCat).filter(function(c, i, a){ return c !== 'outros' && a.indexOf(c) === i; })
@@ -1142,12 +1144,13 @@ function planLikeLegacy(m){
   function add(o, g, v){ o[g] = (o[g] || 0) + v; }
   P.bills.forEach(function(b){
     if (!billActiveIn(b, m) || isSkipped(m, b.id)) return;
-    var p = paymentOf(m, b.id), amt = (!b.variable && p && p.ov) ? p.amount : billAmountIn(b, m);
+    // Já paga: vale o valor pago (fixa com valor diferente ou conta que varia). Assim uma conta paga não deixa sobra "fantasma" prevista.
+    var p = paymentOf(m, b.id), amt = (p && (b.variable || p.ov)) ? p.amount : billAmountIn(b, m);
     if (b.variable || (b.months && b.months.length)) add(est, b.cat, amt); else add(inv, b.cat, amt);
   });
   P.installments.forEach(function(i){
     var k = monthsBetween(i.start, m);
-    if (k >= 0 && k <= instLastRegular(i) && !(i.from && m < i.from) && !(i.skip && i.skip.indexOf(m) >= 0)) add(est, legGroupOf(i.cat, true), instPer(i));
+    if (k >= 0 && k <= instLastRegular(i) && !(i.from && m < i.from) && !(i.skip && i.skip.indexOf(m) >= 0)) add(est, legGroupOf(i.cat, true), k === 0 ? instFirst(i) : instPer(i));
     (i.adv || []).forEach(function(a){ if (a.m === m) add(sp, legGroupOf(i.cat, true), a.amt); });
   });
   md.expenses.forEach(function(e){ add(sp, legGroupOf(e.cat, !!e.inst), e.amount); });
@@ -1304,10 +1307,12 @@ function billNameHit(bill, n){
 // Conta do mês que este gasto parece pagar.
 function matchBill(desc, amount, m){
   var n = norm(desc), bills = activeBills(m);
-  var byName = bills.filter(function(b){ return billNameHit(b, n) && amount >= b.amount * 0.5 && amount <= b.amount * 2; });
+  var byName = bills.filter(function(b){ var pv = billAmountIn(b, m); return (billNameHit(b, n) || nameSim(b.name, desc) >= 0.75) && amount >= pv * 0.5 && amount <= pv * 2; });
   byName.sort(function(a, b){ return (paymentOf(m, a.id) ? 1 : 0) - (paymentOf(m, b.id) ? 1 : 0) || Math.abs(amount - a.amount) - Math.abs(amount - b.amount); });
   var hit = byName[0] || null, how = 'nome';
-  if (!hit){ hit = bills.filter(function(b){ return !b.variable && !paymentOf(m, b.id) && Math.abs(amount - b.amount) < 0.005; })[0] || null; how = 'valor'; }
+  if (!hit){ hit = bills.filter(function(b){ return !b.variable && !paymentOf(m, b.id) && Math.abs(amount - billAmountIn(b, m)) < 0.005; })[0] || null; how = 'valor'; }
+  // Valor muito próximo (até 3%) de uma única conta fixa ainda não paga: provavelmente é ela com juros ou desconto.
+  if (!hit){ var near = bills.filter(function(b){ var pv = billAmountIn(b, m); return !b.variable && !paymentOf(m, b.id) && !isSkipped(m, b.id) && pv >= 20 && Math.abs(amount - pv) <= pv * 0.03; }); if (near.length === 1){ hit = near[0]; how = 'valor-proximo'; } }
   if (!hit) return null;
   return { bill: hit, payment: paymentOf(m, hit.id), how: how };
 }
@@ -1743,9 +1748,40 @@ function sheetHtml(){
   return '<div class="overlay" data-act="overlay"><div class="sheet' + (sh.wide ? ' wide' : '') + '" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' + fn(sh) + '</div></div>';
 }
 var SHEETS = {};
-function openSheet(sh){ UI.sheet = sh; renderSheet(); setTimeout(function(){ var el = document.querySelector('.sheet [data-autofocus]') || document.querySelector('.sheet input:not([type=hidden]):not([type=date]):not([type=month]):not([type=file]):not([type=checkbox]), .sheet select, .sheet button'); if (el && !document.querySelector('.sheet :focus')) try { el.focus(); } catch (e) {} }, 40); }
+function openSheet(sh){ UI.sheet = sh; navArm(); renderSheet(); setTimeout(function(){ var el = document.querySelector('.sheet [data-autofocus]') || document.querySelector('.sheet input:not([type=hidden]):not([type=date]):not([type=month]):not([type=file]):not([type=checkbox]), .sheet select, .sheet button'); if (el && !document.querySelector('.sheet :focus')) try { el.focus(); } catch (e) {} }, 40); }
 function closeSheet(){ if (FB && MIC.on) micStop(); UI.sheet = null; renderSheet(); if (FB && PENDING_RELOAD) requestReload(); }
+/* ---- Botão voltar do celular (e do navegador): volta dentro do app em vez de sair ----
+   O histórico do navegador fica sempre com uma entrada "de guarda". O voltar consome a guarda, o app
+   trata (fecha a janela aberta, volta para a tela anterior ou para o Início) e põe a guarda de novo.
+   No Início, sem nada aberto, o primeiro voltar avisa e o segundo sai do app. */
+var NAVH = { stack: [], armed: false, exitAt: 0, popping: false, on: false };
+function navArm(){ if (!NAVH.on || NAVH.armed) return; try { history.pushState({ poupai: 'app' }, ''); NAVH.armed = true; } catch (e) {} }
+function navInit(){
+  try {
+    if (!window.history || !history.pushState) return;
+    history.replaceState({ poupai: 'base' }, '');
+    NAVH.on = true; navArm();
+    window.addEventListener('popstate', navBack);
+  } catch (e) {}
+}
+function navExtra(route){ return route === 'planejar' ? UI.planTab : route === 'ajustes' ? UI.setTab : undefined; }
+function navPush(route){
+  if (NAVH.popping || !UI.route || UI.route === route) return;
+  if (route === 'home'){ NAVH.stack = []; return; }
+  NAVH.stack.push({ route: UI.route, extra: navExtra(UI.route) }); if (NAVH.stack.length > 30) NAVH.stack.shift();
+}
+function navBack(){
+  NAVH.armed = false;
+  if (UI.sheet){ closeSheet(); navArm(); return; }
+  if (UI.route === 'ajustes' && UI.setTab){ UI.setTab = ''; render(); window.scrollTo(0, 0); navArm(); return; }
+  var prev = NAVH.stack.pop();
+  if (prev || UI.route !== 'home'){ NAVH.popping = true; go(prev ? prev.route : 'home', prev ? prev.extra : undefined); NAVH.popping = false; navArm(); return; }
+  // No Início sem nada aberto: avisa e deixa a guarda desligada por 3 segundos; o próximo voltar nesse tempo sai do app.
+  NAVH.exitAt = Date.now(); toast('Toque em voltar de novo para sair do PoupAí.');
+  setTimeout(function(){ if (Date.now() - NAVH.exitAt >= 2900) navArm(); }, 3000);
+}
 function go(route, extra){
+  navPush(route); navArm();
   UI.route = route; UI.sheet = null;
   if (route === 'planejar' && extra) UI.planTab = extra;
   if (route === 'ajustes') UI.setTab = extra || '';
@@ -1802,8 +1838,8 @@ function heroCard(m, s){
       '<div><dt>Receita do mês</dt><dd>' + money(s.receita) + '</dd></div>' +
       '<div><dt><span class="dot" style="background:var(--hero-a)"></span>' + (s.time === 'future' ? 'Já previsto' : 'Já gastei') + '</dt><dd>' + money(s.jaGastei) + '</dd></div>' +
       '<div><dt><span class="dot" style="background:var(--hero-g)"></span>Guardado</dt><dd>' + money(s.guardado) + '</dd></div>' +
-      '<div><dt><span class="dot" style="background:var(--hero-b)"></span>Ainda vai sair</dt><dd>' + money(s.committed) + '</dd></div></dl>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;padding-top:12px;border-top:1px solid var(--hero-line)"><button type="button" class="link" data-act="explain">Como é calculado</button>' +
+      '<div><dt><span class="dot" style="background:var(--hero-b)"></span>Ainda vai sair</dt><dd>' + (s.committed > 0 ? '<button type="button" class="link" data-act="explain" style="font:inherit;color:inherit;text-decoration:underline;text-underline-offset:3px">' + money(s.committed) + '</button>' : money(s.committed)) + '</dd></div></dl>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;padding-top:12px;border-top:1px solid var(--hero-line)"><button type="button" class="link" data-act="explain">Ver cálculo, contas e estimativas</button>' +
     (s.time !== 'past' ? '<button type="button" class="link" data-act="go" data-v="simular" style="margin-left:auto">Posso comprar?</button>' : '') + '</div></section>';
 }
 function quickCard(){
@@ -1839,7 +1875,7 @@ function scrHome(){
       if (!s.bills.length) rws += homeRow('edit-bill', '', 'bill', 'var(--s1)', 'Contas do mês', 'Cadastre aluguel, luz, internet e outras', '');
       else {
         rws += homeRow('home-bills', '', 'bill', 'var(--s1)', 'Contas do mês', paid.length + ' de ' + live.length + ' pagas' + (pend.length ? ' · ' + pend.length + ' a pagar' : ''), pend.length ? money(s.unpaidBills) : '', !!UI.homeBills);
-        if (UI.homeBills){ var srt = s.bills.slice().sort(function(a, b){ var pa = a.payment || a.skipped ? 1 : 0, pb = b.payment || b.skipped ? 1 : 0; return pa - pb || dueSort(a.bill) - dueSort(b.bill); }); extra = '<div class="list">' + srt.map(function(x){ return billRow(x, m, s.time); }).join('') + '</div>'; }
+        if (UI.homeBills){ var srt = s.bills.slice().sort(function(a, b){ var pa = a.payment || a.skipped ? 1 : 0, pb = b.payment || b.skipped ? 1 : 0; return pa - pb || dueSort(a.bill) - dueSort(b.bill); }); extra = '<div class="list">' + srt.map(function(x){ return billRow(x, m, s.time); }).join('') + '</div><button type="button" class="link" data-act="explain" style="align-self:flex-start">Conferir fixas e estimadas</button>'; }
       }
     }
     if (H.limits){
@@ -2365,7 +2401,7 @@ SHEETS.dayDetail = function(sh){
 };
 
 /* =================== Tela: Planejamento =================== */
-function backHead(title, sub, extra){ return '<div class="page-head"><button type="button" class="iconbtn" data-act="go" data-v="mais" aria-label="Voltar">' + ic('back') + '</button><h1>' + esc(title) + '</h1>' + (extra || '') + (sub ? '<p class="sub">' + esc(sub) + '</p>' : '') + '</div>'; }
+function backHead(title, sub, extra){ return '<div class="page-head"><button type="button" class="iconbtn" data-act="nav-back" data-v="mais" aria-label="Voltar">' + ic('back') + '</button><h1>' + esc(title) + '</h1>' + (extra || '') + (sub ? '<p class="sub">' + esc(sub) + '</p>' : '') + '</div>'; }
 function catAverage(cat, m, n){ var t = 0, c = 0; for (var k = 1; k <= n; k++){ var mm = addMonths(m, -k); if (monthHasActivity(mm)){ t += catSpent(mm, cat); c++; } } return c ? r2(t / c) : 0; }
 function scrPlanejar(){
   var h = backHead('Planejamento', 'Receita, contas que se repetem e limites do dia a dia. É a base para o app calcular quanto está livre.');
@@ -2693,7 +2729,7 @@ function classifyStatement(base){
     var inst = matchInstallment(r.desc, o.amount, m);
     if (inst){ o.type = 'ignorar'; o.badge = 'Parcela já cadastrada'; o.tone = ''; o.note = inst.desc + ' já entra sozinha em ' + monthName(m) + ' (' + money(instPortion(inst, m)) + ').'; o.refInst = inst.id; return o; }
     var mb = matchBill(r.desc, o.amount, m);
-    if (mb && !mb.payment && !claimed[m + mb.bill.id]){ claimed[m + mb.bill.id] = 1; o.type = 'conta'; o.billId = mb.bill.id; o.cat = mb.bill.cat; o.badge = 'Conta do mês'; o.tone = 'warn'; var d = r2(o.amount - mb.bill.amount); o.note = mb.bill.name + ' · previsto ' + money(mb.bill.amount) + (Math.abs(d) >= 0.01 ? (d > 0 ? ' (' + money(d) + ' acima)' : ' (' + money(-d) + ' abaixo)') : '') + '. Será marcada como paga.'; return o; }
+    if (mb && !mb.payment && !claimed[m + mb.bill.id]){ claimed[m + mb.bill.id] = 1; o.type = 'conta'; o.billId = mb.bill.id; o.cat = mb.bill.cat; o.badge = 'Conta do mês'; o.tone = 'warn'; var d = r2(o.amount - billAmountIn(mb.bill, m)); o.note = mb.bill.name + ' · previsto ' + money(billAmountIn(mb.bill, m)) + (Math.abs(d) >= 0.01 ? (d > 0 ? ' (' + money(d) + ' acima)' : ' (' + money(-d) + ' abaixo)') : '') + '. Será marcada como paga.'; return o; }
     if (mb && mb.payment){ o.type = 'ignorar'; o.badge = 'Conta já paga'; o.tone = 'bad'; o.note = mb.bill.name + ' já foi registrada em ' + fmtDay(mb.payment.date) + ' com ' + money(mb.payment.amount) + '.'; return o; }
     var ex = expensesNear(o.date, 3).filter(function(e){ return isRepeatOf(e, r.desc, o.amount, o.date) || (Math.abs(e.amount - o.amount) < 0.005 && Math.abs(daysBetween(e.date, o.date)) <= 3); })[0];
     if (ex){ o.type = 'ignorar'; o.badge = 'Já lançado'; o.tone = 'bad'; o.note = ex.desc + ' · ' + money(ex.amount) + ' em ' + fmtDay(ex.date); return o; }
@@ -2916,7 +2952,7 @@ function setPrefs(){
   var pr = P.prefs, h = '';
   h += '<section class="sec"><h2>Aparência</h2><div class="grid3">' + [['auto', 'Automático', 'auto', 'Segue o Claude'], ['light', 'Claro', 'sun', 'Sempre claro'], ['dark', 'Escuro', 'moon', 'Sempre escuro']].map(function(o){ return '<button type="button" class="tile" style="align-items:flex-start;gap:6px;' + (pr.theme === o[0] ? 'border-color:var(--accent);background:var(--accent-soft)' : '') + '" data-act="pref-theme" data-v="' + o[0] + '" aria-pressed="' + (pr.theme === o[0]) + '">' + ic(o[2], 22) + '<b style="font-size:13.5px">' + o[1] + '</b><span class="sub">' + o[3] + '</span></button>'; }).join('') + '</div></section>';
   h += '<section class="sec"><h2>Como você costuma pagar</h2><div class="list">' + [['credit', 'Quase tudo no cartão de crédito', 'card'], ['account', 'Quase tudo da conta, Pix ou débito', 'bank'], ['mixed', 'Uso bastante os dois', 'repeat'], ['simple', 'Prefiro não separar, só ver o total', 'list']].map(function(o){ return '<button type="button" class="item" data-act="pref-pay" data-v="' + o[0] + '" aria-pressed="' + (pr.payMode === o[0]) + '"><span class="ic"' + (pr.payMode === o[0] ? ' style="background:var(--accent);color:var(--accent-ink)"' : '') + '>' + ic(o[2], 18) + '</span><span class="main2"><span class="t">' + o[1] + '</span></span>' + (pr.payMode === o[0] ? ic('check', 18) : '') + '</button>'; }).join('') + '</div>' +
-    selectField('pf-method', 'Forma de pagamento sugerida no lançamento', METHODS.map(function(x){ return [x.id, x.name]; }), pr.defaultMethod) + '</section>';
+    selectField('pf-method', 'Forma de pagamento já marcada ao lançar', [['', 'Nenhuma, escolho na hora']].concat(METHODS.map(function(x){ return [x.id, x.name]; })), pr.launchMethod || '') + '</section>';
   h += '<section class="sec"><h2>Avisos</h2><div class="card pad" style="display:flex;flex-direction:column;gap:8px">' + selectField('pf-alert', 'Avisar contas que vencem em até', [[0, 'Só no dia'], [1, '1 dia'], [2, '2 dias'], [3, '3 dias'], [5, '5 dias'], [7, '7 dias']], pr.alertDays) +
     '<p class="faint" style="font-size:12px;margin:0">Os avisos aparecem no sino e na tela inicial enquanto o app está aberto. O protótipo não envia notificações no celular.</p></div></section>';
   h += '<section class="sec"><h2>Tela inicial</h2><div class="card pad" style="display:flex;flex-direction:column;gap:2px">' + HOME_BLOCKS.map(function(b){ return '<button type="button" class="toggle" data-act="pref-home" data-v="' + b.id + '" aria-pressed="' + (!!pr.home[b.id]) + '"><span class="tt"><span>' + esc(b.name) + '</span></span><span class="sw" aria-hidden="true"></span></button>'; }).join('') + '</div>' +
@@ -2966,7 +3002,7 @@ function setAjuda(){
 /* =================== Folha: Lançar (gasto inteligente, conta paga, entrada, guardar) =================== */
 function launchState(tipo, extra){
   var d = defaultDate();
-  return Object.assign({ type: 'launch', tipo: tipo || 'gasto', f: { q: '', val: '', date: d, desc: '', cat: '', method: P.prefs.defaultMethod || 'pix', bank: '', parc: false, n: '3', pstart: '', defer: false, deferTo: '', note: '', bill: '', dest: '', withdraw: false, t: {}, dismiss: {}, catOpen: false } }, extra || {});
+  return Object.assign({ type: 'launch', tipo: tipo || 'gasto', f: { q: '', val: '', date: d, desc: '', cat: '', method: P.prefs.launchMethod || '', bank: '', parc: false, n: '3', pstart: '', defer: false, deferTo: '', note: '', bill: '', dest: '', withdraw: false, t: {}, dismiss: {}, catOpen: false } }, extra || {});
 }
 // Aplica o que foi entendido da frase nos campos que a pessoa ainda não mexeu.
 function applyParse(sh){
@@ -2975,7 +3011,7 @@ function applyParse(sh){
   if (!f.t.date) f.date = p.date || defaultDate();
   if (!f.t.desc) f.desc = p.desc;
   if (!f.t.cat) f.cat = p.cat || '';
-  if (!f.t.method && p.method) f.method = p.method; else if (!f.t.method && !p.method) f.method = P.prefs.defaultMethod || 'pix';
+  if (!f.t.method && p.method) f.method = p.method; else if (!f.t.method && !p.method) f.method = P.prefs.launchMethod || '';
   if (!f.t.bank) f.bank = p.bank || '';
   if (!f.t.parc){ f.parc = p.n >= 2; if (p.n >= 2){ f.n = String(p.n); if (!f.t.method && !p.method) f.method = 'credito'; } }
   if (!f.t.defer){ var dt = autoDefer(f.date, f.method, f.bank); f.defer = !!dt; f.deferTo = dt; }
@@ -2992,8 +3028,8 @@ function launchSuggestion(sh){
   var mb = matchBill(desc, val, m);
   if (mb && !D['bill:' + mb.bill.id]){
     if (mb.payment) return { kind: 'billPaid', bill: mb.bill, tone: 'bad', text: mb.bill.name + ' já foi paga em ' + fmtDay(mb.payment.date) + ' com ' + money(mb.payment.amount) + '. Lançar de novo vai somar mais ' + money(val) + ' aos gastos de ' + monthName(m) + '.', yes: 'Não lançar', no: 'É outro pagamento' };
-    var diff = r2(val - mb.bill.amount);
-    return { kind: 'bill', bill: mb.bill, tone: 'warn', text: 'Isso parece o pagamento de ' + mb.bill.name + ' (' + (mb.bill.variable ? 'cerca de ' : '') + money(mb.bill.amount) + ', ' + dueTxt(mb.bill) + ').' + (Math.abs(diff) >= 0.01 ? ' O valor é ' + money(Math.abs(diff)) + (diff > 0 ? ' maior' : ' menor') + '.' : '') + ' Ao salvar, a conta fica paga com ' + money(val) + ' e não conta duas vezes.' + (mb.how === 'valor' ? ' (Reconhecida pelo valor exato.)' : ''), no: 'Não é essa conta' };
+    var diff = r2(val - billAmountIn(mb.bill, m));
+    return { kind: 'bill', bill: mb.bill, tone: 'warn', text: 'Isso parece o pagamento de ' + mb.bill.name + ' (' + (mb.bill.variable ? 'cerca de ' : '') + money(billAmountIn(mb.bill, m)) + ', ' + dueTxt(mb.bill) + ').' + (Math.abs(diff) >= 0.01 ? ' O valor é ' + money(Math.abs(diff)) + (diff > 0 ? ' maior' : ' menor') + '.' : '') + ' Ao salvar, a conta fica paga com ' + money(val) + (Math.abs(diff) >= 0.01 ? ', que passa a ser o valor dela em ' + monthName(m) : '') + ', e não conta duas vezes.' + (mb.how === 'valor' ? ' (Reconhecida pelo valor exato.)' : mb.how === 'valor-proximo' ? ' (Reconhecida pelo valor parecido.)' : ''), no: 'Não é essa conta' };
   }
   var mi = matchInstallment(desc, val, m);
   if (mi && !D['inst:' + mi.id]) return { kind: 'inst', inst: mi, tone: 'info', text: mi.desc + ' já está em Parcelas e soma ' + money(instPortion(mi, m)) + ' em ' + monthName(m) + ' automaticamente. Lançar de novo contaria duas vezes.', yes: 'Não lançar', no: 'É outra compra' };
@@ -3007,7 +3043,7 @@ function parsedChips(sh){
   if (f.desc) out.push('<span class="pill">' + esc(f.desc) + '</span>');
   if (f.cat && norm(catName(f.cat)) !== norm(f.desc)) out.push('<span class="pill">' + esc(catName(f.cat)) + '</span>');
   if (isDate(f.date)) out.push('<span class="pill">' + esc(f.date === today() ? 'Hoje' : f.date === addDays(today(), -1) ? 'Ontem' : fmtDay(f.date)) + '</span>');
-  out.push('<span class="pill">' + esc((METHOD[f.method] || '') + (f.bank ? ' · ' + f.bank : '')) + '</span>');
+  var mtxt = [METHOD[f.method] || '', f.bank || ''].filter(Boolean).join(' · '); if (mtxt) out.push('<span class="pill">' + esc(mtxt) + '</span>');
   if (f.defer && isMonth(f.deferTo)) out.push('<span class="pill info">Conta em ' + esc(monthName(f.deferTo)) + '</span>');
   return out.join('');
 }
@@ -3077,7 +3113,7 @@ SHEETS.launch = function(sh){
 SHEETS.pay = function(sh){
   var b = billById(sh.billId); if (!b) return sheetHead('Conta não encontrada');
   var h = sheetHead((sh.payId ? 'Pagamento de ' : 'Pagar ') + b.name);
-  h += '<div style="display:flex;gap:12px;align-items:center">' + cico(b.cat, 'lg') + '<p class="muted" style="margin:0">Previsto: ' + (b.variable ? 'cerca de ' : '') + money(b.amount) + ' · ' + dueTxt(b) + (b.method ? ' · ' + esc(METHOD[b.method]) + (b.bank ? ' ' + esc(b.bank) : '') : '') + '</p></div>';
+  h += '<div style="display:flex;gap:12px;align-items:center">' + cico(b.cat, 'lg') + '<p class="muted" style="margin:0">Previsto: ' + (b.variable ? 'cerca de ' : '') + money(billAmountIn(b, UI.month)) + ' · ' + dueTxt(b) + (b.method ? ' · ' + esc(METHOD[b.method]) + (b.bank ? ' ' + esc(b.bank) : '') : '') + '</p></div>';
   h += '<div class="row2">' + moneyField('val', 'Valor pago', sh.f.val, 'Juros, multa ou desconto? Ajuste o valor. A conta continua sendo uma só.') + dateField('date', 'Data do pagamento', sh.f.date) + '</div>';
   h += errBox(sh) + '<div class="actions"><button type="button" class="btn primary block" data-act="save-pay">' + (sh.payId ? 'Salvar' : 'Confirmar pagamento') + '</button>' +
     (sh.payId ? deleteButton(sh, 'del-pay', 'Desfazer pagamento') : '<button type="button" class="btn block" data-act="skip-bill">Essa conta não vem neste mês</button>') + '<button type="button" class="btn block ghost" data-act="edit-bill" data-id="' + esc(b.id) + '">Editar a conta</button></div>';
@@ -3215,14 +3251,69 @@ SHEETS.amount = function(sh){
   h += errBox(sh) + '<div class="actions"><button type="button" class="btn primary block" data-act="save-amount">' + esc(sh.cta || 'Salvar') + '</button></div>';
   return h;
 };
+/* ---- Cálculo do mês com as contas fixas, estimadas, parcelas e limites que entram nele ---- */
+function forecastBills(m){
+  var cm = curMonth();
+  return P.bills.filter(function(b){ return billActiveIn(b, m) || paymentOf(m, b.id); }).map(function(b){
+    var pay = paymentOf(m, b.id) || implicitPayment(b, m), skip = isSkipped(m, b.id), plan = billAmountIn(b, m);
+    var est = !!(b.variable || (b.months && b.months.length));
+    var st = pay ? 'paga' : skip ? 'pulada' : 'falta';
+    return { bill: b, est: est, pay: pay, skip: skip, plan: plan, own: !!(M[m] && M[m].billAmt && M[m].billAmt[b.id] != null), value: pay ? pay.amount : skip ? 0 : plan, st: st, late: st === 'falta' && (m < cm || (m === cm && b.dueDay && b.dueDay < dayOf(today()))) };
+  }).sort(function(x, y){ var o = { falta: 0, paga: 1, pulada: 2 }; return o[x.st] - o[y.st] || dueSort(x.bill) - dueSort(y.bill); });
+}
+function fcRow(x){
+  var b = x.bill, sub;
+  if (x.pay && x.pay.implicit) sub = 'Considerada paga (antes do app novo)';
+  else if (x.pay) sub = 'Paga em ' + fmtDay(x.pay.date) + (Math.abs(x.pay.amount - x.plan) >= 0.01 ? ' · previsto ' + money(x.plan) : '');
+  else if (x.skip) sub = 'Não vem neste mês';
+  else sub = (x.late ? 'Venceu dia ' + b.dueDay : b.dueDay ? 'Vence dia ' + b.dueDay : 'Sem dia de vencimento') + (x.own ? ' · valor só deste mês' : '');
+  var pill = x.pay ? '<span class="pill good">Paga</span>' : x.skip ? '<span class="pill">Pulada</span>' : '<span class="pill' + (x.late ? ' bad' : ' warn') + '">' + (x.late ? 'Atrasada' : 'Falta') + '</span>';
+  return '<button type="button" class="item" data-act="bm-open" data-id="' + esc(b.id) + '">' + cico(b.cat) + '<span class="main2"><span class="t">' + esc(b.name) + '</span><span class="s"' + (x.late ? ' style="color:var(--bad)"' : '') + '>' + esc(sub) + '</span></span><span class="v"' + (x.skip ? ' style="text-decoration:line-through;opacity:.6"' : '') + '>' + (x.est && !x.pay ? '~' : '') + money(x.skip ? x.plan : x.value) + '</span>' + pill + '</button>';
+}
 SHEETS.explain = function(){
-  var s = summary(UI.month), h = sheetHead('Como o número é calculado');
+  var m = UI.month, s = summary(m), h = sheetHead('Como o número é calculado');
   h += '<div class="list">' + kvRow('Receita do mês', money(s.receita)) + kvRow('− Contas já pagas', money(s.paidBills)) + kvRow('− Gastos do dia a dia', money(s.expenses)) + kvRow('− Parcelas deste mês', money(s.instTotal)) + kvRow('− Já guardado', money(s.guardado)) +
     (s.time !== 'past' ? (s.pending != null ? kvRow('− Ainda previsto no mês', money(s.pending)) : kvRow('− Contas que faltam pagar', money(s.unpaidBills)) + kvRow('− O que resta dos limites', money(s.limitsLeft))) + kvRow('− O que falta da meta de guardar', money(s.saveLeft)) : '') +
     '<div class="kv total"><span>= ' + (s.time === 'current' ? 'Livre para gastar' : s.time === 'past' ? 'Sobrou' : 'Previsto para sobrar') + '</span><span class="num">' + money(s.livre) + '</span></div></div>';
-  if (s.pending != null) h += '<p class="muted" style="margin:0;font-size:13.5px">"Ainda previsto" usa a mesma regra da Previsão de gastos do app atual: em cada categoria entram as contas fixas e o maior valor entre o estimado (contas que variam e parcelas) e o que você já gastou nela. O limite só entra nas categorias sem nada previsto.</p>';
-  h += '<p class="muted" style="margin:0;font-size:13.5px">Gastar dentro de um limite não muda esse número, porque o valor já estava reservado. Ele só cai quando você gasta fora dos limites, passa de um limite ou paga uma conta acima do previsto. Uma conta paga é contada uma vez só, mesmo que você tente lançar de novo.</p>';
+  // o que forma o previsto: cada conta, com acesso direto para conferir e corrigir
+  var fb = forecastBills(m), fx = fb.filter(function(x){ return !x.est; }), es = fb.filter(function(x){ return x.est; });
+  function secTot(list){ return sum(list.filter(function(x){ return !x.skip; }), function(x){ return x.value; }); }
+  h += '<p class="muted" style="margin:0;font-size:13.5px">Toque numa conta para conferir ou corrigir o valor, só neste mês ou para todos os meses.</p>';
+  h += '<section class="sec"><div class="sec-head"><h2>' + ic('bill', 18) + 'Contas fixas</h2><span class="num" style="font-weight:700">' + money(secTot(fx)) + '</span></div>' + (fx.length ? '<div class="list">' + fx.map(fcRow).join('') + '</div>' : '<p class="muted" style="margin:0;font-size:13px">Nenhuma conta fixa neste mês.</p>') + '</section>';
+  h += '<section class="sec"><div class="sec-head"><h2>' + ic('repeat', 18) + 'Contas estimadas (o valor varia)</h2><span class="num" style="font-weight:700">' + money(secTot(es)) + '</span></div>' + (es.length ? '<div class="list">' + es.map(fcRow).join('') + '</div><p class="faint" style="margin:0;font-size:12px">O "~" indica estimativa. Depois de paga, vale o valor pago.</p>' : '<p class="muted" style="margin:0;font-size:13px">Nenhuma conta estimada neste mês.</p>') + '</section>';
+  var other = '';
+  if (s.instTotal > 0) other += '<button type="button" class="item" data-act="go" data-v="parcelas"><span class="ic" style="color:var(--sv)">' + ic('card', 19) + '</span><span class="main2"><span class="t">Parcelas</span><span class="s">' + cnt(s.insts.length, 'parcela neste mês', 'parcelas neste mês') + '</span></span><span class="v">' + money(s.instTotal) + '</span>' + ic('next', 16) + '</button>';
+  if (s.time !== 'past'){
+    var reserved = s.limitRows.filter(function(l){ return !fb.some(function(x){ return !x.skip && x.bill.cat === l.cat; }); });
+    reserved.forEach(function(l){ other += '<button type="button" class="item" data-act="go" data-v="planejar">' + cico(l.cat) + '<span class="main2"><span class="t">Limite de ' + esc(catName(l.cat)) + '</span><span class="s">' + money(l.spent) + ' gastos de ' + money(l.limit) + '</span></span><span class="v">' + money(l.left) + '</span>' + ic('next', 16) + '</button>'; });
+    if (s.saveLeft > 0) other += '<button type="button" class="item" data-act="go" data-v="planejar"><span class="ic" style="color:var(--s4)">' + ic('target', 19) + '</span><span class="main2"><span class="t">Meta de guardar no mês</span><span class="s">Falta guardar</span></span><span class="v">' + money(s.saveLeft) + '</span>' + ic('next', 16) + '</button>';
+  }
+  if (other) h += '<section class="sec"><div class="sec-head"><h2>' + ic('list', 18) + 'Também entram</h2></div><div class="list">' + other + '</div></section>';
+  if (s.pending != null) h += '<p class="muted" style="margin:0;font-size:13px">"Ainda previsto": em cada categoria entram as contas fixas e o maior valor entre o estimado (contas que variam e parcelas) e o que você já gastou nela. O limite só entra nas categorias sem nada previsto. Gastar dentro de um limite não muda o número, porque o valor já estava reservado.</p>';
   if (s.deferredIn.length) h += '<p class="muted" style="margin:0;font-size:13px">Inclui ' + cnt(s.deferredIn.length, 'compra do mês anterior', 'compras do mês anterior') + ' que conta neste mês (Pix no crédito ou fatura).</p>';
+  h += '<div class="actions"><button type="button" class="btn block" data-act="edit-bill" data-id="">' + ic('plus', 16) + 'Nova conta</button></div>';
+  return h;
+};
+// Conferir e corrigir uma conta no mês: valor só deste mês ou de todos, fixa ou estimada, pagar ou pular.
+SHEETS.billMonth = function(sh){
+  var b = billById(sh.billId), m = sh.m; if (!b) return sheetHead('Conta não encontrada');
+  var pay = paymentOf(m, b.id) || implicitPayment(b, m), skip = isSkipped(m, b.id), f = sh.f, plan = billAmountIn(b, m);
+  var h = sheetHead(b.name, 'bm-back');
+  h += '<div style="display:flex;gap:12px;align-items:center">' + cico(b.cat, 'lg') + '<p class="muted" style="margin:0">' + esc((b.variable ? 'Estimada, o valor varia' : 'Fixa') + ' · ' + catName(b.cat) + ' · ' + dueTxt(b)) + (Math.abs(b.amount - plan) >= 0.005 ? '<br>Valor normal ' + money(b.amount) + ', em ' + esc(monthName(m)) + ' ' + money(plan) : '') + '</p></div>';
+  if (pay){
+    h += '<div class="notice good">Paga em ' + esc(fmtDay(pay.date)) + ' com ' + money(pay.amount) + (Math.abs(pay.amount - plan) >= 0.01 ? ' (previsto ' + money(plan) + ')' : '') + '. É esse valor que conta no mês.</div>';
+    h += '<div class="actions">' + (pay.implicit ? '' : '<button type="button" class="btn primary block" data-act="edit-pay" data-id="' + esc(b.id) + '">Corrigir o pagamento</button>') + '<button type="button" class="btn block ghost" data-act="edit-bill" data-id="' + esc(b.id) + '">Editar a conta</button></div>';
+    return h;
+  }
+  if (skip){
+    h += '<div class="notice">Marcada como "não vem neste mês". Ela não entra no cálculo de ' + esc(monthName(m)) + '.</div>';
+    h += '<div class="actions"><button type="button" class="btn primary block" data-act="bm-skip">Voltar a contar neste mês</button><button type="button" class="btn block ghost" data-act="edit-bill" data-id="' + esc(b.id) + '">Editar a conta</button></div>';
+    return h;
+  }
+  h += moneyField('val', (f.variable ? 'Valor estimado' : 'Valor') + ' em ' + monthName(m), f.val);
+  h += toggleField('variable', 'O valor muda todo mês', f.variable, 'Luz, água, gás: fica como estimativa até você pagar');
+  h += errBox(sh) + '<div class="actions"><button type="button" class="btn primary block" data-act="bm-save" data-v="mes">Salvar só para ' + esc(monthName(m)) + '</button><button type="button" class="btn block" data-act="bm-save" data-v="todos">Salvar para todos os meses</button>' +
+    '<button type="button" class="btn block outline-accent" data-act="pay" data-id="' + esc(b.id) + '">' + ic('check', 16) + 'Já paguei</button><button type="button" class="btn block ghost" data-act="bm-skip">Essa conta não vem neste mês</button><button type="button" class="btn block ghost" data-act="edit-bill" data-id="' + esc(b.id) + '">Editar nome, dia e categoria</button></div>';
   return h;
 };
 SHEETS.dups = function(){
@@ -3444,7 +3535,25 @@ var ACTIONS = {
   avisos: function(){ openSheet({ type: 'avisos' }); },
   guide: function(){ openSheet({ type: 'guide', i: 0 }); },
   'guide-step': function(el){ UI.sheet.i = +el.dataset.v; renderSheet(); },
-  explain: function(){ openSheet({ type: 'explain' }); },
+  explain: function(){ openSheet({ type: 'explain', wide: true }); },
+  'bm-open': function(el){ var b = billById(el.dataset.id); if (!b) return; var m = UI.month; openSheet({ type: 'billMonth', billId: b.id, m: m, wide: true, f: { val: moneyPlain(billAmountIn(b, m)), variable: !!b.variable } }); },
+  'bm-back': function(){ openSheet({ type: 'explain', wide: true }); },
+  'bm-save': function(el){
+    var sh = UI.sheet, b = sh && billById(sh.billId); if (!b) return closeSheet();
+    var m = sh.m, v = parseMoney(sh.f.val || fv('val')); if (!(v > 0)) return setErr('Informe um valor maior que zero, por exemplo 129,90.');
+    var md = monthDoc(m, true), wasVar = b.variable;
+    b.variable = !!sh.f.variable;
+    if (el.dataset.v === 'todos'){ b.amount = v; if (md.billAmt) delete md.billAmt[b.id]; }
+    else { md.billAmt = md.billAmt || {}; if (Math.abs(v - b.amount) < 0.005) delete md.billAmt[b.id]; else md.billAmt[b.id] = v; }
+    UI.sheet = { type: 'explain', wide: true }; commit(['perfil', kMonth(m)]);
+    toast(b.name + ': ' + money(v) + (el.dataset.v === 'todos' ? ' em todos os meses' : ' em ' + monthName(m)) + (wasVar !== b.variable ? (b.variable ? ', agora estimada' : ', agora fixa') : '') + '.');
+  },
+  'bm-skip': function(){
+    var sh = UI.sheet, m = sh.m, md = monthDoc(m, true), id = sh.billId, b = billById(id);
+    if (md.skips.indexOf(id) >= 0){ md.skips = md.skips.filter(function(x){ return x !== id; }); toast((b ? b.name : 'Conta') + ' volta a contar em ' + monthName(m) + '.'); }
+    else { md.skips.push(id); toast((b ? b.name : 'Conta') + ' não conta em ' + monthName(m) + '.'); }
+    UI.sheet = { type: 'explain', wide: true }; commit(kMonth(m));
+  },
   'score-info': function(){ openSheet({ type: 'scoreInfo' }); },
   'checklist-off': function(){ P.prefs.checklistOff = true; commit('perfil'); },
   // --- Gastos
@@ -3461,7 +3570,9 @@ var ACTIONS = {
   'gbulk-del': function(){ var m = UI.month, ids = Object.keys(UI.gSel).filter(function(k){ return UI.gSel[k]; }); if (!ids.length) return; withUndo([kMonth(m)], function(){ M[m].expenses = M[m].expenses.filter(function(e){ return ids.indexOf(e.id) < 0; }); UI.gSel = {}; UI.gBulk = false; }, cnt(ids.length, 'gasto excluído', 'gastos excluídos') + '.'); },
   entry: function(el){ openEntry(el.dataset.v, el.dataset.id, UI.month); },
   'entry-save': function(el){ openEntry('guardado', el.dataset.id, el.dataset.v); },
-  'go-cat': function(el){ UI.route = 'gastos'; UI.gView = 'lista'; UI.gFilter = 'tudo'; UI.gCat = el.dataset.v || el.dataset.id || ''; UI.sheet = null; render(); window.scrollTo(0, 0); },
+  // Seta de voltar do topo das telas: mesma regra do botão voltar do celular (tela anterior; senão, a indicada).
+  'nav-back': function(el){ var prev = NAVH.stack.pop(); NAVH.popping = true; go(prev ? prev.route : (el.dataset.v || 'home'), prev ? prev.extra : undefined); NAVH.popping = false; },
+  'go-cat': function(el){ navPush('gastos'); navArm(); UI.route = 'gastos'; UI.gView = 'lista'; UI.gFilter = 'tudo'; UI.gCat = el.dataset.v || el.dataset.id || ''; UI.sheet = null; render(); window.scrollTo(0, 0); },
   // --- Contas
   pay: function(el){ var b = billById(el.dataset.id); if (!b) return; var m = UI.month; openSheet({ type: 'pay', billId: b.id, f: { val: moneyPlain(billAmountIn(b, m)), date: m === curMonth() ? today() : dateIn(m, Math.min(b.dueDay || 1, daysIn(m))) } }); },
   'edit-pay': function(el){ var m = UI.month, p = paymentOf(m, el.dataset.id); if (!p) return; openSheet({ type: 'pay', billId: el.dataset.id, payId: p.id, payMonth: m, f: { val: moneyPlain(p.amount), date: p.date } }); },
@@ -3501,7 +3612,7 @@ var ACTIONS = {
     var name = el.dataset.f, v = el.dataset.v;
     if (/^sim-n-\d+$/.test(name)){ var it = UI.sim.items[+name.slice(6)]; if (it){ it.n = v; render(); } return; }
     if (!UI.sheet) return; var f = UI.sheet.f;
-    if (name === 'method'){ f.method = v; f.t.method = true; refreshDefer(f); }
+    if (name === 'method'){ f.method = f.method === v ? '' : v; f.t.method = true; refreshDefer(f); }
     else if (name === 'n'){ f.n = v; f.t.parc = true; }
     else f[name] = v;
     renderSheet();
@@ -3784,7 +3895,7 @@ function onField(t){
   var sm = /^sim-(val|start|j)-(\d+)$/.exec(k || '');
   if (sm && UI.sim){ var it = UI.sim.items[+sm[2]]; if (!it) return; it[sm[1] === 'val' ? 'val' : sm[1] === 'start' ? 'start' : 'juros'] = t.value; return refreshPart('sim-out', simResult()); }
   // preferências que salvam ao mudar
-  if (k === 'pf-method'){ if (METHOD[t.value]){ P.prefs.defaultMethod = t.value; commit('perfil'); toast('Forma padrão: ' + METHOD[t.value] + '.'); } return; }
+  if (k === 'pf-method'){ if (!t.value || METHOD[t.value]){ P.prefs.launchMethod = t.value; if (t.value) P.prefs.defaultMethod = t.value; commit('perfil'); toast(t.value ? 'Forma já marcada ao lançar: ' + METHOD[t.value] + '.' : 'Nenhuma forma marcada ao lançar.'); } return; }
   if (k === 'pf-alert'){ var d = parseInt(t.value, 10); if (d >= 0 && d <= 10){ P.prefs.alertDays = d; commit('perfil'); } return; }
   var sh = UI.sheet; if (!sh || !sh.f || !t.dataset.f) return;
   var f = sh.f;
@@ -4225,7 +4336,8 @@ function legacyToApp(L){
   raw.since = isMonth(NE.since) ? NE.since : cm;
   raw.incomes = (Array.isArray(C.salaries) ? C.salaries : []).map(function(s){ return { id: s && s.id, name: s && s.label, amount: legNum(s && s.amount) }; });
   raw.limits = {}; Object.keys(C.tetos || {}).forEach(function(k){ var v = legNum(C.tetos[k]); if (v > 0) raw.limits[k] = v; });
-  var pr = NE.prefs || {};
+  var pr = NE.prefs || {}, mir = C.poupaiPrefs;
+  if (mir && typeof mir === 'object' && (!NE.prefs || (Number(mir.at) || 0) > (Number(NE.updatedAt) || 0))){ pr = Object.assign({}, mir); delete pr.at; }
   raw.prefs = Object.assign({}, pr, { payMode: legPayMode(), pinned: Array.isArray(C.headerCards) ? C.headerCards.slice(0, 2) : [] });
   // categorias
   var icons = NE.catIcons || {}, over = {};
@@ -4582,6 +4694,10 @@ function planLegacyWrite(){
   if (!same(P.limits, bP.limits)){ var tt = {}; Object.keys(P.limits).forEach(function(k){ tt[k] = P.limits[k]; }); C.tetos = tt; }
   if (!same(P.prefs.payMode, bP.prefs.payMode)) C.paymentMode = P.prefs.payMode;
   if (!same(P.prefs.pinned, bP.prefs.pinned)) C.headerCards = P.prefs.pinned.slice(0, 2);
+  // Preferências do app novo também ficam aqui (além de novo/estado), para não se perderem se novo/ não puder ser gravado.
+  var prefMirror = { theme: P.prefs.theme, defaultMethod: P.prefs.defaultMethod, launchMethod: P.prefs.launchMethod || '', pixCreditNext: P.prefs.pixCreditNext, alertDays: P.prefs.alertDays, checklistOff: !!P.prefs.checklistOff, home: P.prefs.home };
+  var oldMirror = (C.poupaiPrefs && typeof C.poupaiPrefs === 'object') ? Object.assign({}, C.poupaiPrefs) : null; if (oldMirror) delete oldMirror.at;
+  if (!same(oldMirror, prefMirror)) C.poupaiPrefs = Object.assign({}, prefMirror, { at: now });
   if (!same(P.cats, bP.cats)){
     ['categoryLabels', 'categoryColors', 'categoryKeywords'].forEach(function(k){ C[k] = Object.assign({}, C[k] || {}); });
     BASE_IDS.forEach(function(id){
@@ -4649,7 +4765,7 @@ function planLegacyWrite(){
   var invExtra = {}; P.investments.forEach(function(x){ if (x.monthly) invExtra[x.id] = { monthly: x.monthly }; });
   var pr = P.prefs;
   var est = { v: 1, since: P.since || curMonth(), writeOk: true, name: P.name || '', avatar: P.avatar || '', learn: P.learn, dupOk: P.dupOk, cards: P.cards, catIcons: catIcons, billExtra: billExtra, invExtra: invExtra, rates: RATE_OVERRIDE || null,
-    prefs: { theme: pr.theme, defaultMethod: pr.defaultMethod, pixCreditNext: pr.pixCreditNext, alertDays: pr.alertDays, checklistOff: !!pr.checklistOff, home: pr.home } };
+    prefs: { theme: pr.theme, defaultMethod: pr.defaultMethod, launchMethod: pr.launchMethod || '', pixCreditNext: pr.pixCreditNext, alertDays: pr.alertDays, checklistOff: !!pr.checklistOff, home: pr.home } };
   var NO = { estado: est };
   Object.keys(NP).forEach(function(m){ var d = NP[m]; if (Object.keys(d.pay).length || d.inv.length || Object.keys(d.xd).length) NO['m-' + m] = { pay: d.pay, inv: d.inv, xd: d.xd }; });
 
@@ -4952,7 +5068,10 @@ function hideSplash(){
 function applyTheme(){
   var t = P.prefs && P.prefs.theme, r = document.documentElement;
   r.classList.toggle('th-dark', t === 'dark'); r.classList.toggle('th-light', t === 'light');
+  if (MODE === 'real') try { localStorage.setItem('poupai-tema', t || 'auto'); } catch (e) {}
 }
+// Na abertura, antes do login e dos dados chegarem, usa o último tema escolhido neste aparelho (evita abrir no escuro e trocar depois).
+function themeEarly(){ var t = ''; try { t = localStorage.getItem('poupai-tema') || ''; } catch (e) {} if (t === 'light' || t === 'dark'){ var r = document.documentElement; r.classList.toggle('th-dark', t === 'dark'); r.classList.toggle('th-light', t === 'light'); } }
 
 /* =================== Login (mesmas contas do app atual) =================== */
 var AUTH = { state: 'checking', mode: 'login', user: null, msg: '', ok: false, busy: false, intent: '', retried: false, email: '' };
@@ -5175,6 +5294,7 @@ function paywallHtml(route){
 function fbModeBanner(){
   if (!LEG) return '';
   if (LEG.storage !== 2) return '<div class="banner warn" role="note"><strong>Sua conta ainda está no formato antigo.</strong><span>Abra o app atual uma vez: ele atualiza o formato sozinho. Até lá, o app novo só lê.</span></div>';
+  if (NOVO_DENIED || (LEG.novo && LEG.novo.ok === false)) return '<div class="banner warn" role="note"><strong>Parte dos dados não está sendo salva no servidor.</strong><span>As regras do Firestore não liberam a pasta users/{uid}/novo, onde ficam contas marcadas como pagas, cartões e algumas preferências. Os lançamentos e o tema continuam salvos.</span></div>';
   return '';
 }
 function fbPerfilHtml(){
@@ -5239,12 +5359,15 @@ var IA_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,applicati
     st.textContent = '@keyframes iapulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.12);opacity:.65}}.ia-pulse{animation:iapulse 1.4s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.ia-pulse{animation:none}}' +
       '.ia-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}.ia-row:first-child{border-top:0}.ia-row.off .ia-body,.ia-row.off .v{opacity:.55}' +
       '.ia-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit}' +
+      '@property --ia-ang{syntax:"<angle>";initial-value:0deg;inherits:false}'+
+      '.ia-glow{position:relative;border:2px solid transparent!important;background:linear-gradient(var(--surface),var(--surface)) padding-box,conic-gradient(from var(--ia-ang),#4285F4,#9B72CB,#D96570,#EA4335,#FBBC04,#34A853,#4285F4) border-box!important;box-shadow:0 0 14px -4px rgba(66,133,244,.55),0 0 18px -6px rgba(234,67,53,.45);animation:iaspin 3.2s linear infinite;font-weight:650}'+
+      '.ia-glow svg{color:#4285F4}@keyframes iaspin{to{--ia-ang:360deg}}@media (prefers-reduced-motion:reduce){.ia-glow{animation:none}}' +
       '.ia-body .t{font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ia-body .s{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ia-body .n{font-size:12px;color:var(--muted);white-space:normal}';
     document.head.appendChild(st);
   } catch (e) {}
 })();
 function iaState(){ return UI.ia || (UI.ia = { stage: 'start', file: '', rows: null, info: null, msg: '' }); }
-function iaButtonHtml(){ return '<button type="button" class="btn sm block" data-act="ia-open">' + ic('sparkles', 16) + 'Ler foto, print ou PDF com IA</button>'; }
+function iaButtonHtml(){ return '<button type="button" class="btn sm block ia-glow" data-act="ia-open">' + ic('sparkles', 16) + 'Ler foto, print ou PDF com IA</button>'; }
 function iaDests(){ return P.investments.map(function(x){ return ['inv:' + x.id, 'Investimento: ' + x.name]; }).concat(P.goals.map(function(g){ return ['goal:' + g.id, 'Meta: ' + g.name]; })); }
 function iaTouch(){ try { return window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } }
 
@@ -5304,6 +5427,7 @@ function iaReviewHtml(S){
     '<span style="display:flex;flex-direction:column;min-width:0"><b style="font-size:16px">' + cnt(rows.length, 'lançamento encontrado', 'lançamentos encontrados') + '</b><span class="muted" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(S.file) + '</span></span></div>' +
     '<span class="muted" style="font-size:13px">Selecionados: ' + cnt(on.length, 'linha', 'linhas') + (out ? ' · saídas ' + money(out) : '') + (inn ? ' · entradas ' + money(inn) : '') + '</span></div>';
   if (x.aviso || x.truncado) h += '<div class="notice warn"><strong>Atenção:</strong> ' + esc([x.aviso, x.truncado ? 'Vieram só os primeiros 100 lançamentos' + (x.vistas > 100 ? ' de ' + x.vistas : '') + '; envie o restante em outro arquivo.' : ''].filter(Boolean).join(' ')) + '</div>';
+  if (x.repetido) h += '<div class="notice info">Esse mesmo arquivo já tinha sido lido hoje. Se você salvou a leitura anterior, o que já está no app aparece desmarcado como <strong>Já lançado</strong>.</div>';
   var nDup = on.filter(function(r){ return r.maybeDup; }).length;
   if (nDup) h += '<div class="notice warn">' + (nDup === 1 ? '1 lançamento parece repetido' : nDup + ' lançamentos parecem repetidos') + '. Confira os marcados com <strong>Pode ser repetido</strong> e desmarque o que já estava no app.</div>';
   h += '<p class="muted" style="margin:0;font-size:13px">A leitura automática pode errar. Toque numa linha para conferir ou editar; use a caixa para incluir ou deixar de fora. O que já existe no app vem desmarcado.</p>';
@@ -5524,7 +5648,7 @@ async function iaFile(file){
       S.stage = 'start';
       S.msg = (d.tipo === 'nao_financeiro' ? 'Não encontrei compras, pagamentos ou recebimentos nesse arquivo.' : 'Não encontrei lançamentos nesse arquivo.') + (d.aviso ? ' ' + d.aviso : '') + ' Se o print tiver mais de uma tela, envie a parte com os valores.';
     } else {
-      S.rows = iaRows(itens, d.tipo); S.info = { aviso: d.aviso || '', truncado: !!d.truncado, vistas: d.vistas || 0, tipo: d.tipo }; S.stage = 'review';
+      S.rows = iaRows(itens, d.tipo); S.info = { aviso: d.aviso || '', truncado: !!d.truncado, vistas: d.vistas || 0, tipo: d.tipo, repetido: !!d.repetido }; S.stage = 'review';
     }
   } catch (e) {
     var code = String((e && e.code) || '').replace(/^functions\//, '');
@@ -5541,6 +5665,8 @@ async function iaFile(file){
 /* =================== Início do app =================== */
 try { document.documentElement.lang = 'pt-BR'; } catch (e) {}
 app = document.getElementById('app');
+themeEarly();
+navInit();
 boot();
 
 })();
