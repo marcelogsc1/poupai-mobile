@@ -2621,6 +2621,7 @@ function scrImportar(){
   if (!I.rows){
     h += '<div class="scrollx" role="group" aria-label="O que importar">' + IMP_MODES.map(function(x){ return '<button type="button" class="chip" data-act="imp-mode" data-v="' + x.id + '" aria-pressed="' + (I.mode === x.id) + '">' + ic(x.icon, 16) + esc(x.name) + '</button>'; }).join('') + '</div>';
     h += '<p class="muted" style="margin:0;font-size:13.5px">' + esc((IMP_MODES.filter(function(x){ return x.id === I.mode; })[0] || IMP_MODES[0]).help) + '</p>';
+    if (FB && I.mode === 'auto' && typeof iaImportCardHtml === 'function') h += iaImportCardHtml(I);
     h += '<div class="cols two"><div class="col"><label class="drop" id="imp-drop" for="imp-file">' + ic('upload', 32) + '<b>Escolher arquivo</b><span class="muted" style="font-size:13px">ou arraste aqui · CSV, TXT, OFX, XLSX ou XLS até 5 MB</span>' + (I.file ? '<span class="pill accent">' + esc(I.file) + '</span>' : '') + (I.busy ? '<span class="pill">Lendo…</span>' : '') + '</label><input type="file" id="imp-file" class="sr" accept=".csv,.txt,.ofx,.qfx,.tsv,.xlsx,.xls,text/csv,text/plain"></div>' +
       '<div class="col"><div class="field"><label for="imp-text">Ou cole as linhas aqui</label><textarea class="input" id="imp-text" data-live="impText" rows="8" maxlength="400000" placeholder="05/10 SUPERMERCADO EXTRA 132,90&#10;08/10 VIVO FIBRA 99,90&#10;10/10 PGTO BOLETO IMOBILIARIA 1.450,00">' + esc(I.text) + '</textarea><div class="hint">Pode colar com cabeçalho. Linhas de total, saldo e pagamento de fatura são ignoradas.</div></div></div></div>';
     h += '<div class="err" id="imp-err" role="alert">' + esc(I.msg || '') + '</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn primary" style="flex:2;min-width:200px" data-act="imp-analyze">' + ic('search', 18) + 'Analisar e revisar</button>' + (MODE !== 'real' ? '<button type="button" class="btn" style="flex:1;min-width:160px" data-act="imp-sample">Linhas de teste</button>' : '') + '</div>';
@@ -2633,6 +2634,7 @@ function scrImportar(){
   }
   var rows = I.rows, counts = {};
   rows.forEach(function(r){ counts[r.type] = (counts[r.type] || 0) + 1; });
+  if (I.source === 'IA' && typeof iaReviewNotice === 'function') h += iaReviewNotice(I);
   h += '<div class="notice info">' + (I.source === 'OFX' ? 'Arquivo OFX lido. ' : '') + 'O app comparou cada linha com suas contas, parcelas e lançamentos. Confira a ação de cada uma antes de confirmar.' + (I.skipped ? ' ' + cnt(I.skipped, 'linha foi ignorada', 'linhas foram ignoradas') + ' (sem valor, cabeçalho repetido ou linha de total e saldo).' : '') + '</div>';
   h += '<div class="chips">' + Object.keys(counts).map(function(k){ return '<span class="pill ' + (k === 'ignorar' ? '' : 'accent') + '">' + counts[k] + ' · ' + esc(IMP_TYPES[k] || k) + '</span>'; }).join('') + '</div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sm' + (I.bulk ? ' primary' : '') + '" data-act="imp-bulk">' + ic('check', 16) + (I.bulk ? 'Selecionando' : 'Editar várias de uma vez') + '</button></div>';
@@ -2877,6 +2879,7 @@ SHEETS.launch = function(sh){
   if (!sh.editId) h += '<div class="seg" role="group" aria-label="Tipo de lançamento">' + [['gasto', 'Gasto'], ['conta', 'Conta paga'], ['entrada', 'Entrada'], ['guardar', 'Guardar']].map(function(t){ return '<button type="button" data-act="ltype" data-v="' + t[0] + '" aria-pressed="' + (sh.tipo === t[0]) + '">' + t[1] + '</button>'; }).join('') + '</div>';
   if (sh.tipo === 'gasto'){
     if (!sh.editId) h += '<div class="smart"><label class="sr" for="q">O que você gastou?</label>' + (typeof micAvailable === 'function' && micAvailable() ? '<div class="qrow">' : '') + '<input class="input" id="q" data-f="q" data-autofocus autocomplete="off" maxlength="160" placeholder="Ex.: mercado 52,30 ontem no débito" value="' + esc(f.q) + '">' + (typeof micAvailable === 'function' && micAvailable() ? '<button type="button" class="micbtn" data-act="mic" aria-pressed="' + !!MIC.on + '" aria-label="' + (MIC.on ? 'Parar de ouvir' : 'Falar o gasto') + '">' + ic('mic', 22) + '</button></div>' : '') + '<div class="parsed" id="parsed" aria-live="polite">' + (f.q ? parsedChips(sh) : '<span class="muted" style="font-size:12.5px">Escreva do seu jeito: valor, o que foi, quando e como pagou. Ex.: "tv 2400 12x no Nubank", "uber 23,50 ontem", "dia 5 aluguel 1450".</span>') + '</div></div>';
+    if (!sh.editId && FB && typeof iaButtonHtml === 'function') h += iaButtonHtml();
     var sug = launchSuggestion(sh); sh._sug = sug;
     if (sug) h += '<div class="suggest ' + sug.tone + '" role="status"><span>' + esc(sug.text) + '</span><div class="row-actions">' + (sug.yes ? '<button type="button" class="btn sm' + (sug.kind === 'billPaid' || sug.kind === 'inst' || sug.kind === 'repeat' ? ' primary' : '') + '" data-act="sug-yes">' + esc(sug.yes) + '</button>' : '') + '<button type="button" class="btn sm" data-act="sug-no">' + esc(sug.no) + '</button></div></div>';
     h += '<div class="' + (sh.editId ? '' : 'more-fields') + '" style="display:flex;flex-direction:column;gap:12px">';
@@ -4955,7 +4958,7 @@ SHEETS.fbWrite = function(){
 SHEETS.fbPremium = function(){
   var st = premiumState(), h = sheetHead('PoupAí Premium');
   h += '<div class="notice ' + st.tone + '"><strong>' + esc(st.title) + '</strong> ' + esc(st.detail) + '</div>';
-  h += '<div class="list">' + [['sparkles', 'Balanço financeiro inteligente', 'Score, alertas e leitura clara do mês.'], ['chart', 'Análises e gráficos', 'Gastos por categoria, evolução e comparativos.'], ['trend', 'Investimentos e patrimônio', 'Rendimento estimado e projeções.'], ['target', 'Metas', 'Quanto falta, quanto guardar e em quanto tempo.']].map(function(x){ return '<div class="item"><span class="ic">' + ic(x[0], 19) + '</span><span class="main2"><span class="t">' + x[1] + '</span><span class="s" style="white-space:normal">' + x[2] + '</span></span></div>'; }).join('') + '</div>';
+  h += '<div class="list">' + [['sparkles', 'Balanço financeiro inteligente', 'Score, alertas e leitura clara do mês.'], ['chart', 'Análises e gráficos', 'Gastos por categoria, evolução e comparativos.'], ['trend', 'Investimentos e patrimônio', 'Rendimento estimado e projeções.'], ['target', 'Metas', 'Quanto falta, quanto guardar e em quanto tempo.'], ['file', 'Leitura com IA', 'Foto, print ou PDF viram lançamentos para você revisar.']].map(function(x){ return '<div class="item"><span class="ic">' + ic(x[0], 19) + '</span><span class="main2"><span class="t">' + x[1] + '</span><span class="s" style="white-space:normal">' + x[2] + '</span></span></div>'; }).join('') + '</div>';
   h += '<p class="muted" style="margin:0;font-size:13px">A assinatura pela Play Store chega em breve. Quando você assinar, o Premium vale em qualquer aparelho em que entrar com este e-mail.</p>';
   return h;
 };
@@ -5042,6 +5045,122 @@ ACTIONS.mic = function(){
   r.onend = function(){ MIC.on = false; MIC.rec = null; if (UI.sheet === sh) renderSheet(); };
   try { r.start(); MIC.on = true; MIC.rec = r; renderSheet(); } catch (e) { MIC.on = false; toast('Não consegui ligar o microfone.'); }
 };
+
+/* =================== Leitura com IA: foto, print ou PDF viram linhas da importação ===================
+   O arquivo vai para a Cloud Function iaLerArquivo, que confere login, plano e limite diário e chama o Gemini.
+   Nenhuma chave fica aqui. O resultado entra na tela de Importar, que compara com o que já existe antes de salvar. */
+var IA = { busy: false, fnRegion: 'us-central1', maxBytes: 6 * 1024 * 1024, maxSide: 2048 };
+function iaButtonHtml(){
+  return '<button type="button" class="btn sm block" data-act="ia-open"' + (IA.busy ? ' disabled' : '') + '>' + ic('sparkles', 16) + (IA.busy ? 'Lendo arquivo com IA…' : 'Ler foto, print ou PDF com IA') + '</button>';
+}
+function iaImportCardHtml(I){
+  var h = '';
+  if (I.iaBusy) h += '<div class="notice info" role="status"><strong>Lendo ' + esc(I.iaFile || 'o arquivo') + ' com IA…</strong> Leva alguns segundos. Depois você revisa cada linha antes de salvar.</div>';
+  return h + '<button type="button" class="card pad" style="display:flex;gap:12px;align-items:center;text-align:left;width:100%" data-act="ia-open"' + (IA.busy ? ' disabled' : '') + '><span class="ic" style="background:var(--accent-soft);color:var(--accent)">' + ic('sparkles', 19) + '</span><span class="main2" style="display:flex;flex-direction:column;gap:2px"><b>Foto, print ou PDF com IA</b><span class="muted" style="font-size:13px">' + (isPremium() ? 'Comprovante, fatura ou extrato. A IA lê e você confere antes de salvar.' : 'Faz parte do Premium.') + '</span></span>' + ic('next', 16) + '</button>';
+}
+function iaReviewNotice(I){
+  var x = I.ia || {};
+  return '<div class="notice warn" role="note"><strong>Lido com IA.</strong> Confira valor, data e descrição de cada linha: a leitura automática pode errar.' +
+    (x.aviso ? ' ' + esc(x.aviso) : '') + (x.truncado ? ' Vieram só os primeiros 50 lançamentos; envie o restante em outro arquivo.' : '') +
+    (typeof x.restantes === 'number' ? ' ' + (x.restantes > 0 ? 'Você ainda tem ' + cnt(x.restantes, 'leitura', 'leituras') + ' com IA hoje.' : 'Esta foi sua última leitura com IA de hoje.') : '') + '</div>';
+}
+ACTIONS['ia-open'] = function(){
+  if (MODE !== 'real' || !AUTH.user) return toast('Entre na sua conta para ler arquivos com IA.');
+  if (!isPremium()) return openSheet({ type: 'fbPremium' });
+  if (IA.busy) return toast('Ainda estou lendo o arquivo anterior.');
+  // campo de arquivo temporário: abre a escolha de foto ou PDF sem mexer no resto da tela
+  var inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf'; inp.className = 'sr'; inp.setAttribute('aria-hidden', 'true'); inp.tabIndex = -1;
+  inp.addEventListener('change', function(){ var f = inp.files && inp.files[0]; if (inp.parentNode) inp.parentNode.removeChild(inp); if (f) iaFile(f); });
+  document.body.appendChild(inp);
+  setTimeout(function(){ if (inp.parentNode) inp.parentNode.removeChild(inp); }, 10 * 60 * 1000);
+  inp.click();
+};
+function iaMimeOf(file){
+  var t = String(file.type || '').toLowerCase(), ext = (String(file.name || '').split('.').pop() || '').toLowerCase();
+  if (t === 'application/pdf' || ext === 'pdf') return 'application/pdf';
+  if (t === 'image/jpeg' || ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (t === 'image/png' || ext === 'png') return 'image/png';
+  if (t === 'image/webp' || ext === 'webp') return 'image/webp';
+  if (t === 'image/heic' || ext === 'heic') return 'image/heic';
+  if (t === 'image/heif' || ext === 'heif') return 'image/heif';
+  return '';
+}
+function iaBlobToBase64(blob){
+  return new Promise(function(res, rej){ var r = new FileReader(); r.onload = function(){ var s = String(r.result || ''); res(s.slice(s.indexOf(',') + 1)); }; r.onerror = function(){ rej(new Error('leitura')); }; r.readAsDataURL(blob); });
+}
+// Reduz fotos grandes antes de enviar: menos dados no celular e menos custo na leitura.
+function iaShrink(file){
+  return new Promise(function(res){
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function(){
+      try {
+        var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, IA.maxSide / Math.max(w, h));
+        var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+        var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function(b){ URL.revokeObjectURL(url); res(b && b.size ? { blob: b, mime: 'image/jpeg' } : null); }, 'image/jpeg', 0.85);
+      } catch (e) { URL.revokeObjectURL(url); res(null); }
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); res(null); };
+    img.src = url;
+  });
+}
+function iaErrorText(e){
+  var code = String((e && e.code) || '').replace(/^functions\//, ''), msg = String((e && e.message) || '');
+  if (['resource-exhausted', 'invalid-argument', 'permission-denied', 'unauthenticated', 'unavailable'].indexOf(code) >= 0 && msg && !/^(internal|INTERNAL)$/.test(msg)) return msg;
+  if (code === 'deadline-exceeded') return 'A leitura demorou demais. Tente um arquivo menor ou uma foto só da parte com os lançamentos.';
+  if (code === 'not-found') return 'A leitura com IA ainda não está publicada no servidor.';
+  if (!navigator.onLine) return 'Sem internet. Conecte e tente de novo.';
+  return 'A leitura com IA falhou. Tente de novo em instantes.';
+}
+// Converte o que a IA leu no formato que a importação já entende (mesmo caminho de CSV e OFX).
+function iaToBase(it, tipoDoc){
+  var fatura = tipoDoc === 'fatura_cartao', entrada = it.tipo === 'entrada';
+  var desc = cleanText(it.descricao, 80) || 'Lançamento';
+  var forma = { pix: 'pix', debito: 'debito', credito: 'credito', boleto: 'boleto', dinheiro: 'dinheiro' }[it.forma] || '';
+  var parc = it.parcela_total >= 2 ? 'parcela ' + it.parcela_atual + '/' + it.parcela_total : '';
+  return { date: isDate(it.data) ? it.data : '', desc: desc, amount: r2(Math.abs(Number(it.valor) || 0)), sign: (entrada || fatura) ? 1 : -1, orig: false,
+    line: [desc, forma, parc].filter(Boolean).join(' '), catCell: cleanText(it.categoria, 30), typeCell: entrada ? 'entrada' : 'gasto', instText: parc,
+    nCell: '', nparcCell: '', startCell: '', periodCell: '', rateCell: '', liqCell: '', dueCell: '', amtHeader: '' };
+}
+async function iaFile(file){
+  var mime = iaMimeOf(file);
+  if (!mime) return toast('Use uma foto (JPG, PNG, WEBP ou HEIC) ou um PDF.');
+  if (IA.busy) return;
+  var I = { mode: 'auto', text: '', file: '', iaFile: cleanText(file.name, 60), rows: null, skipped: 0, bulk: false, sel: {}, msg: '', busy: false, iaBusy: true, source: '' };
+  IA.busy = true; UI.imp = I;
+  if (UI.route === 'importar'){ UI.sheet = null; render(); } else go('importar');
+  try {
+    var blob = file, sendMime = mime;
+    if (/^image\/(jpeg|png|webp)$/.test(mime) || (/^image\/hei[cf]$/.test(mime) && file.size > IA.maxBytes)){
+      var sm = await iaShrink(file);
+      if (sm && (sm.blob.size < file.size || mime !== 'image/jpeg')){ blob = sm.blob; sendMime = sm.mime; }
+    }
+    if (blob.size > IA.maxBytes) throw { code: 'invalid-argument', message: 'Arquivo grande demais. Use até 6 MB.' };
+    var b64 = await iaBlobToBase64(blob);
+    await fbInit();
+    var fm = await import(FB_SDK + 'firebase-functions.js');
+    var call = fm.httpsCallable(fm.getFunctions(FX.app, IA.fnRegion), 'iaLerArquivo', { timeout: 130000 });
+    var res = await call({ mime: sendMime, arquivo: b64 });
+    var d = (res && res.data) || {}, itens = Array.isArray(d.itens) ? d.itens : [];
+    I.iaBusy = false;
+    if (!itens.length){
+      I.msg = (d.tipo === 'nao_financeiro' ? 'Esse arquivo não parece um comprovante, fatura ou extrato.' : 'Não encontrei lançamentos nesse arquivo.') + (d.aviso ? ' ' + d.aviso : '') + (typeof d.restantes === 'number' ? ' Restam ' + cnt(d.restantes, 'leitura', 'leituras') + ' com IA hoje.' : '');
+    } else {
+      I.rows = classifyStatement(itens.map(function(it){ return iaToBase(it, d.tipo); }));
+      I.source = 'IA'; I.ia = { aviso: d.aviso || '', truncado: !!d.truncado, restantes: d.restantes };
+    }
+  } catch (e) {
+    I.iaBusy = false;
+    if (String((e && e.code) || '').replace(/^functions\//, '') === 'permission-denied' && !isPremium()){ IA.busy = false; if (UI.imp === I) render(); return openSheet({ type: 'fbPremium' }); }
+    I.msg = iaErrorText(e);
+    console.warn('[PoupAí] Leitura com IA:', e && e.code);
+  }
+  IA.busy = false;
+  if (UI.imp !== I) return toast(I.rows ? 'A leitura com IA terminou, mas você saiu de Importar. Envie o arquivo de novo para revisar.' : (I.msg || 'A leitura com IA terminou.'));
+  if (UI.route === 'importar'){ render(); window.scrollTo(0, 0); }
+  else toast(I.rows ? 'Leitura com IA pronta. Abra Importar para revisar.' : I.msg);
+}
 
 /* =================== Início do app =================== */
 try { document.documentElement.lang = 'pt-BR'; } catch (e) {}
